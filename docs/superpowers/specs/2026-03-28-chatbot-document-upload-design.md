@@ -1,218 +1,478 @@
-# Chatbot Document Upload Design
+# Chatbot Knowledge Engine Design
 
 ## Summary
 
-Add document upload to both chatbot modes (`web` and `crm`) so users can attach a file to the current chat session, receive an immediate analysis summary in-chat, and continue asking follow-up questions about that uploaded file during the same session.
+Build a shared knowledge engine for both chatbot surfaces in this repo:
 
-Version 1 supports:
+- `myra-web`: public landing-page loan advisor
+- `myra-crm`: owner-facing CRM copilot
 
-- `PDF`
-- Excel workbooks (`.xls`, `.xlsx`)
+The chatbot must stop behaving like a prompt-only assistant and instead answer from grounded evidence:
 
-Version 1 constraints:
+- structured facts from PostgreSQL
+- uploaded PDF and Excel knowledge sources
+- explicit citations showing where each answer came from
 
-- Files are available only for the current chat session
-- One uploaded file is active per session at a time
-- Re-uploading replaces the previous file context for that session
+The system should support two knowledge scopes:
+
+- `global` knowledge base for the public web chatbot
+- `owner` knowledge bases for CRM tenants, with strict access control
+
+This design intentionally uses retrieval-first architecture rather than model fine-tuning. In this product, "train on uploaded files" means parse, index, embed, retrieve, and cite. Fine-tuning is not the primary knowledge mechanism.
+
+## Why This Change Is Needed
+
+The current repo already has separate web and CRM chat paths, but the answer quality is limited by the existing architecture:
+
+- [src/app/api/chat/route.ts](C:\Users\risha\OneDrive\Desktop\agent\agent\src\app\api\chat\route.ts) is mainly intent classification plus light knowledge injection
+- [src/lib/knowledgeBase.ts](C:\Users\risha\OneDrive\Desktop\agent\agent\src\lib\knowledgeBase.ts) is product-search oriented and Mongo-based, not a generalized cited retrieval layer
+- [src/app/api/chat/web/route.ts](C:\Users\risha\OneDrive\Desktop\agent\agent\src\app\api\chat\web\route.ts) and [src/app/api/chat/crm/route.ts](C:\Users\risha\OneDrive\Desktop\agent\agent\src\app\api\chat\crm\route.ts) split the agents correctly, but they do not share a document intelligence pipeline
+
+The main failure mode is generic answers. That happens when the model is not forced to reason over exact evidence and instead relies on broad prompting.
 
 ## Goals
 
-- Let users upload a `PDF` or Excel file directly from the existing chatbot UI
-- Return an automatic first-pass analysis in the assistant response immediately after upload
-- Preserve normalized document context for follow-up questions in the same chat session
-- Support the feature in both `web` and `crm` modes without introducing a separate analysis workflow
+- Support uploading `PDF`, `XLS`, `XLSX`, and `CSV` knowledge sources
+- Make uploaded files searchable and citable in chatbot answers
+- Use a single shared ingestion and retrieval core for both web and CRM assistants
+- Answer landing-page loan questions using:
+  - structured PostgreSQL product and policy data
+  - approved global knowledge documents
+- Answer CRM owner questions using:
+  - PostgreSQL CRM/dashboard data
+  - owner-scoped uploaded knowledge
+  - optionally approved global knowledge where useful
+- Return citations showing exact file and source location
+- Reduce hallucinations by blocking unsupported answers when evidence is weak
+- Preserve CRM action workflows such as WhatsApp follow-ups, daily briefs, and to-do generation
 
 ## Non-Goals
 
-- Multi-file session management
-- Long-term document persistence
-- Cross-session document recall
-- Deep Excel formula evaluation or workbook auditing
-- A standalone document analysis page outside chat
+- Fine-tuning a foundation model on uploaded documents in v1
+- Replacing CRM action tools with free-form model behavior
+- Full spreadsheet calculation engine or workbook auditing
+- Multi-tenant public sharing beyond the explicit `global` scope
+- Trusting unreviewed global uploads in public answers
+
+## Product Decomposition
+
+This initiative must be built as three related sub-projects rather than one vague "AI chatbot" feature:
+
+1. `Knowledge ingestion and retrieval core`
+2. `Web loan advisor grounding`
+3. `CRM copilot grounding and actions`
+
+The implementation order should follow that dependency chain. Both chat surfaces depend on the shared knowledge engine.
 
 ## User Experience
 
-### Upload Flow
+### Web Chatbot
 
-1. User opens either chatbot mode.
-2. User selects a `PDF` or Excel file in the composer.
-3. User may optionally add a prompt with the upload.
-4. User sends the message.
-5. The assistant responds in chat with:
-   - a short summary of the uploaded file
-   - important extracted fields, tables, or sheet highlights
-   - notable issues, anomalies, or missing information when detected
-   - an invitation to ask follow-up questions about the file
+The landing-page chatbot should answer questions about:
 
-### Follow-Up Flow
+- loan products
+- eligibility
+- lender requirements
+- process and timelines
+- document requirements
+- policy nuances contained in uploaded files
 
-1. After a successful upload, the file is treated as the active document for the current chat session.
-2. Later user messages in that same session automatically include the normalized document context in backend prompt construction.
-3. If the user uploads another file, the new file replaces the previous session document context.
+The answer must be based on:
 
-### Failure Flow
+- PostgreSQL facts where a structured answer exists
+- approved global uploaded documents when policy/process context is needed
 
-- Unsupported file types are rejected with a clear assistant-safe message.
-- Empty files are rejected.
-- Oversized files are rejected.
-- Parse or analysis failures return a user-readable error and do not overwrite the current session context.
-- If session-scoped context is lost due to cache eviction or restart, the assistant asks the user to upload the file again.
+The UI should display citations alongside the answer, including file and page or sheet references.
 
-## Architecture
+### CRM Copilot
 
-### UI
+The CRM assistant should act as an owner's operational co-worker. It should:
 
-Update [ChatClient](C:\Users\risha\OneDrive\Desktop\agent\agent\src\components\ChatClient.tsx) to:
+- answer questions about dashboard state and business performance
+- answer process or policy questions from owner-scoped or approved global knowledge
+- generate daily briefs and owner to-dos
+- trigger follow-up actions such as WhatsApp reminders through explicit tools
 
-- add a file input to the existing composer
-- show the selected filename before send
-- submit either plain JSON or `multipart/form-data` depending on whether a file is attached
-- show upload/analysis loading state
+The CRM assistant must keep a hard distinction between:
 
-The existing chat page and mode toggle remain unchanged.
+- answering from knowledge
+- performing an operational action
 
-### API Integration
+An answer can be grounded in uploaded files, but an action must go through a verified tool path with auth and auditability.
 
-Keep the existing route split:
+## Recommended Architecture
 
-- [web chat route](C:\Users\risha\OneDrive\Desktop\agent\agent\src\app\api\chat\web\route.ts) or the route it delegates to
-- [CRM assistant route](C:\Users\risha\OneDrive\Desktop\agent\agent\src\app\api\crm-assistant\route.ts)
+Use classic grounded retrieval architecture with hybrid search and scoped tools:
 
-Each mode should support two request shapes:
+- PostgreSQL as the primary system of record
+- `pgvector` for semantic embeddings
+- object storage for raw uploaded files
+- a document ingestion pipeline for PDFs and spreadsheets
+- a shared retrieval service that enforces scope
+- an answer grounding layer that forces citations
 
-- existing JSON chat requests when no file is attached
-- `multipart/form-data` requests when a file is attached
+This replaces the current mixed prompt-and-search behavior with a knowledge engine that can support both chatbots coherently.
 
-The upload-capable flow should:
+### Rejected Alternatives
 
-1. validate file type and size
-2. parse the file into normalized analysis data
-3. build a compact session document context
-4. store that context under the current chat session ID
-5. generate an assistant summary response using the uploaded content
+#### Prompt-only knowledge injection
 
-### Session Storage
+Rejected because it does not scale, produces generic answers, and cannot reliably support citations.
 
-Store uploaded document context in session-scoped cache keyed by session ID and mode.
+#### Fine-tuning on uploaded files as the primary mechanism
 
-The stored structure should contain:
+Rejected because the corpus needs freshness, spreadsheet changes are frequent, and citations are required. Even if fine-tuning is added later for tone or classification, retrieval remains the main knowledge mechanism.
 
-- file metadata:
-  - name
-  - mime type
-  - uploaded timestamp
-- normalized content:
-  - PDF analysis output or workbook summary
-- prompt-ready compact context string used for follow-up questions
+## System Components
 
-Session storage should be ephemeral and aligned with the existing chat caching/session strategy. Mongo persistence is not required for this feature.
+### 1. Upload and Ingestion Service
 
-## File Processing
+Responsible for:
 
-### PDF
+- accepting uploads from admin and owner interfaces
+- validating file type and size
+- storing raw files in object storage
+- creating asynchronous ingestion jobs
+- exposing processing status and failure reasons
 
-Reuse [document analyser](C:\Users\risha\OneDrive\Desktop\agent\agent\src\lib\documentAnalyser.ts) where possible for PDF analysis, then normalize the returned content into:
+Supported file types in v1:
 
-- summary-ready extracted findings
-- issues/anomalies
-- compact prompt context for later Q&A
+- `pdf`
+- `xls`
+- `xlsx`
+- `csv`
 
-The existing analyzer is oriented toward lending documents. The integration should keep that specialization where useful, but the session context builder must produce stable output even when a PDF does not cleanly match the predefined checklist workflow.
+### 2. Document Parser Layer
 
-### Excel
+Responsible for turning raw files into normalized content units.
 
-Add a workbook parser that converts Excel content into normalized chat context instead of treating the raw binary as model input.
+For PDFs:
 
-For each workbook:
+- extract page text
+- preserve page numbers
+- preserve section or heading context where possible
+- optionally use specialized parsing for lending documents when it adds value
 
-- enumerate sheet names
-- capture per-sheet row counts and column headers
-- include a bounded preview of representative rows
-- detect obviously empty sheets or malformed tabular structure
+For Excel and CSV:
 
-The normalized result should then be summarized into:
+- enumerate workbook and sheet names
+- extract headers
+- preserve row ranges
+- normalize row blocks into bounded text/table segments
+- retain enough structure for citations such as sheet name and row intervals
 
-- workbook overview
-- sheet-level highlights
-- notable irregularities
-- compact prompt context for follow-up Q&A
+### 3. Chunking and Embedding Layer
 
-The implementation should explicitly bound how much worksheet content is retained for prompting so uploads do not create unbounded token growth.
+Responsible for:
 
-## Prompting and Follow-Up Q&A
+- chunking normalized content into retrieval-friendly units
+- preserving citation metadata for every chunk
+- generating embeddings
+- storing chunk records in PostgreSQL with vector data
 
-After a successful upload:
+Each chunk must keep source references such as:
 
-- the immediate assistant response summarizes the uploaded file
-- later user prompts in the same session automatically include the active document context
+- file ID and file name
+- page number for PDFs
+- sheet name for Excel
+- row start and row end for tabular blocks
+- section heading where available
 
-Follow-up behavior:
+### 4. Knowledge Retrieval Service
 
-- if a session document exists, document context is injected ahead of the user message
-- if no session document exists, chat falls back to current behavior without document awareness
+Responsible for:
 
-The prompt should clearly separate:
+- semantic retrieval by embedding similarity
+- keyword retrieval for exact term matches
+- metadata filtering by scope, product, lender, category, and status
+- reranking the final evidence set
 
-- chat mode context (`web` or `crm`)
-- normalized document context
-- current user question
+Scope rules:
 
-This reduces ambiguity and keeps later Q&A grounded in the uploaded file.
+- web chatbot: `global` documents only
+- CRM chatbot: current owner's documents, plus optionally approved global documents
+- owner A must never retrieve owner B's knowledge
+
+### 5. Answer Grounding Service
+
+Responsible for building the model evidence pack from:
+
+- structured PostgreSQL facts
+- retrieved knowledge chunks
+- source citation metadata
+
+The model prompt should instruct the assistant to:
+
+- answer only from provided evidence
+- cite the source(s) used
+- clearly state when evidence is insufficient
+- avoid inventing unsupported product or policy details
+
+If evidence is weak or contradictory, the assistant should answer conservatively instead of improvising.
+
+### 6. CRM Action Layer
+
+The existing CRM tool architecture should remain, but be extended to consume grounded knowledge where needed.
+
+Examples:
+
+- follow-up reminder recommendations using client data plus uploaded policy/process docs
+- daily brief generation using dashboard facts plus recent owner knowledge
+- to-do generation grounded in pipeline state and reminders
+
+Free-form generation must not be allowed to send WhatsApp messages or update CRM state without explicit tool execution.
+
+## Data Architecture
+
+### PostgreSQL as Primary Store
+
+PostgreSQL should become the primary knowledge and CRM store. This simplifies the architecture relative to the current split between Mongo-based knowledge and other storage patterns.
+
+Use PostgreSQL for:
+
+- structured product tables
+- CRM entities
+- document metadata
+- ingestion jobs
+- knowledge chunks
+- embeddings via `pgvector`
+- answer trace logs
+
+### Object Storage
+
+Use object storage for:
+
+- original uploaded files
+- optional rendered previews or extraction artifacts
+
+Object storage should not be queried directly by the model. All retrieval should go through indexed metadata and chunks.
+
+## Proposed Database Additions
+
+Add tables roughly like the following:
+
+### `knowledge_sources`
+
+One row per uploaded file.
+
+Fields should include:
+
+- `id`
+- `scope` with values such as `global` or `owner`
+- `owner_id` or `partner_id` where relevant
+- `storage_key`
+- `mime_type`
+- `display_name`
+- `status` with values such as `uploaded`, `processing`, `ready`, `failed`, `archived`, `needs_review`
+- `created_at`
+- `updated_at`
+
+### `knowledge_source_versions`
+
+Tracks re-uploads and reprocessing.
+
+Fields should include:
+
+- `knowledge_source_id`
+- `checksum`
+- `parser_version`
+- `embedding_version`
+- `status`
+- `created_at`
+
+### `knowledge_chunks`
+
+Stores chunk text and citation metadata.
+
+Fields should include:
+
+- `id`
+- `knowledge_source_version_id`
+- `chunk_text`
+- `embedding`
+- `page_number`
+- `sheet_name`
+- `row_start`
+- `row_end`
+- `section_title`
+- `metadata_json`
+
+### `knowledge_tags`
+
+Supports admin review and filtering.
+
+Fields should include:
+
+- `knowledge_source_id`
+- `tag_type`
+- `tag_value`
+
+### `knowledge_ingestion_jobs`
+
+Stores async processing state.
+
+Fields should include:
+
+- `id`
+- `knowledge_source_version_id`
+- `job_type`
+- `status`
+- `retry_count`
+- `error_message`
+- `started_at`
+- `finished_at`
+
+### `answer_traces`
+
+Optional but recommended audit table.
+
+Fields should include:
+
+- `id`
+- `chat_surface`
+- `scope`
+- `actor_id`
+- `question`
+- `retrieved_chunk_ids`
+- `citation_payload`
+- `answer_text`
+- `confidence_flags`
+- `created_at`
+
+## Source-of-Truth Rules
+
+When evidence conflicts:
+
+- live operational CRM facts from PostgreSQL win over documents
+- structured product records in PostgreSQL win over stale uploaded spreadsheets
+- documents are still valid for policy, process, and contextual guidance when they do not conflict with current structured facts
+
+This keeps the chatbot from citing an old sheet over a live dashboard fact.
+
+## Approval and Publishing Rules
+
+### Global Knowledge
+
+Global knowledge should require review before public use.
+
+Recommended flow:
+
+1. upload
+2. process
+3. review citations and extracted structure
+4. mark as approved
+5. publish to web retrieval
+
+### Owner Knowledge
+
+Owner-scoped CRM knowledge can become searchable immediately after successful processing, but should still support:
+
+- status flags
+- reprocessing
+- archive and delete
+- visibility into parser failures
 
 ## Error Handling
 
-Validation and runtime errors must return assistant-safe responses rather than raw stack traces.
+Handled failure cases must include:
 
-Handled cases:
+- unsupported file type
+- empty or unreadable file
+- oversized file
+- parse failure
+- embedding failure
+- retrieval returns insufficient evidence
+- scope violation attempts
+- CRM action requested without auth or explicit tool path
 
-- unsupported MIME type or extension
-- empty file
-- file above configured size limit
-- parsing failure
-- analysis failure
-- missing session document on follow-up after cache loss
+Rules:
 
-When upload processing fails:
+- failed uploads never become retrievable
+- parsing or embedding failures show clear status in UI
+- low-confidence retrieval produces a conservative answer
+- unsupported questions should return "I could not verify that from available sources"
 
-- do not replace the existing active session document
-- return a user-facing error message
-- keep normal chat available
+## Security and Access Control
+
+- web chatbot can read only approved `global` knowledge
+- CRM chatbot can read only the authenticated owner's scoped data plus allowed global knowledge
+- owner-scoped document retrieval must be enforced in retrieval code, not just prompt instructions
+- raw file access should be server-controlled
+- action tools must keep existing auth boundaries
+
+This is especially important because the CRM assistant will act as a co-worker and may handle sensitive customer and business data.
 
 ## Testing Strategy
 
-Follow TDD for implementation.
+The implementation should be test-driven and grouped around the shared knowledge engine first.
 
-Required tests:
+Required test categories:
 
-- PDF upload request produces an immediate analysis response
-- Excel upload request produces an immediate analysis response
-- follow-up message uses stored session document context
-- unsupported file type is rejected
-- empty upload is rejected
-- parsing failure does not overwrite prior session document context
+### Parser Tests
 
-Testing focus should be on:
+- PDF extraction preserves page references
+- Excel extraction preserves sheet names and row ranges
+- malformed files fail safely
 
-- parser/normalizer behavior
-- route behavior for upload requests
-- session context storage and follow-up retrieval
+### Chunking and Metadata Tests
 
-Client tests are only needed for non-trivial UI logic such as attachment state transitions. Most feature coverage should stay in server and library tests.
+- chunks retain citation metadata
+- oversized sheets are bounded correctly
+- chunk boundaries do not lose section context
 
-## Implementation Notes
+### Retrieval Tests
 
-- Keep the first version to one active file per session
-- Prefer extending existing chat infrastructure over introducing a separate upload subsystem
-- Keep UI changes minimal and aligned with the existing chat composer
-- Bound retained Excel content to avoid oversized prompts
-- Ensure the feature works for both anonymous/public web chat and authenticated CRM chat within their current authorization rules
+- web retrieves only approved global knowledge
+- CRM retrieves owner knowledge and never crosses tenant boundary
+- hybrid retrieval surfaces relevant exact-match spreadsheet cells and semantic PDF passages
+
+### Grounding Tests
+
+- answers include citations
+- unsupported questions are answered conservatively
+- conflicting evidence follows source-of-truth rules
+
+### CRM Tooling Tests
+
+- WhatsApp actions require explicit tool invocation
+- daily briefs use structured dashboard context
+- task generation uses owner-scoped state
+
+## Rollout Order
+
+Recommended milestone sequence:
+
+1. shared ingestion and retrieval core
+2. web chatbot grounding with citations
+3. CRM read-only copilot over dashboard and documents
+4. CRM actions: WhatsApp reminders, daily briefs, and owner to-dos
+5. review tooling, analytics, and operational controls
+
+This order ensures the intelligence layer is correct before adding automation on top.
+
+## Impact on Current Repo
+
+The design should evolve the current repo rather than replace it.
+
+Likely impact areas:
+
+- [src/app/api/chat/web/route.ts](C:\Users\risha\OneDrive\Desktop\agent\agent\src\app\api\chat\web\route.ts)
+- [src/app/api/chat/crm/route.ts](C:\Users\risha\OneDrive\Desktop\agent\agent\src\app\api\chat\crm\route.ts)
+- [src/lib/knowledgeBase.ts](C:\Users\risha\OneDrive\Desktop\agent\agent\src\lib\knowledgeBase.ts)
+- [src/server/crm-assistant/service.ts](C:\Users\risha\OneDrive\Desktop\agent\agent\src\server\crm-assistant\service.ts)
+- [db/crm_assistant_schema.sql](C:\Users\risha\OneDrive\Desktop\agent\agent\db\crm_assistant_schema.sql)
+
+The existing route split is already useful. The main architectural change is introducing a shared knowledge engine and moving the knowledge source of truth toward PostgreSQL plus `pgvector`.
 
 ## Risks and Trade-Offs
 
-- Session-only storage is simpler and matches the requirement, but document context can disappear on restart or cache loss
-- Direct route extension is the smallest change, but it mixes file parsing and chat concerns in the request layer
-- Excel normalization is useful for summarization and Q&A, but it will not support full spreadsheet semantics in v1
+- ingestion and retrieval add operational complexity compared with prompt-only chat
+- spreadsheet parsing quality must be bounded and predictable
+- public global knowledge needs review workflow to avoid bad or stale answers
+- migrating away from Mongo-based knowledge search will require careful staged adoption
 
-## Recommended Approach
+These trade-offs are acceptable because they directly address the current failure mode: generic, weakly grounded answers.
 
-Implement document upload directly in the existing chatbot flow, use session-scoped cache for active document context, reuse the current PDF analyzer, and add bounded Excel normalization for workbook summarization and follow-up Q&A.
+## Recommended Direction
+
+Build a shared knowledge engine first, grounded in PostgreSQL and `pgvector`, with explicit document ingestion, scoped retrieval, and mandatory citations. Then adapt the web chatbot and CRM copilot to consume that engine. Keep CRM actions tool-driven and audited.
