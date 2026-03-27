@@ -39,3 +39,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# AI assistant / agent local artifacts (never commit)
+.codex/
+.claude/
+.worktrees/
