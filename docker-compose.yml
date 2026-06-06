@@ -1,0 +1,37 @@
+version: "3.9"
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      REDIS_URL: redis://redis:6379
+      POSTGRES_URL: postgresql://gps:gps@postgres:5432/gps_crm
+      R2_BUCKET: gps-india-documents
+    depends_on:
+      - redis
+      - postgres
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: gps_crm
+      POSTGRES_USER: gps
+      POSTGRES_PASSWORD: gps
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/crm_assistant_schema.sql:/docker-entrypoint-initdb.d/001_schema.sql:ro
+
+volumes:
+  postgres_data:

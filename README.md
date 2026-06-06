@@ -1,77 +1,151 @@
-# Myra AI 
+# Myra AI - GPS India (Dual-Agent System)
 
-Myra AI is a powerful, plug-and-play AI customer support platform designed for modern websites. It allows businesses to integrate an intelligent chatbot in minutes, providing 24/7 instant support using their own business knowledge.
+Myra AI is a production-grade dual-agent platform for GPS India Financial Services (loan origination + DSA partner management).
 
-##  Features
+It contains two distinct agents with separate auth boundaries, personas, and tool ecosystems:
 
-- **Plug & Play**: Add the chatbot to any website with a single script tag.
-- **Admin Controlled**: Full control over what the AI knows and how it responds.
-- **Always Online**: Instant answers for your customers 24/7.
-- **Customizable Knowledge**: Train the AI with your business-specific information.
-- **Enterprise SSO**: Secure authentication via Scalekit (SAML/SSO).
-- **Responsive Design**: Modern UI built with Tailwind CSS 4 and Motion animations.
+- `myra-web`: public website lending advisor (unauthenticated, no applicant-data access)
+- `myra-crm`: partner CRM operations copilot (strict partner JWT required)
 
-##  Tech Stack
+## What this repo includes
 
-- **Framework**: [Next.js 15](https://nextjs.org/) (App Router)
-- **Language**: [TypeScript](https://www.typescriptlang.org/)
-- **AI Engine**: [Google Gemini AI](https://ai.google.dev/) (`gemini-2.0-flash`)
-- **Authentication**: [Scalekit](https://www.scalekit.com/) (Enterprise SSO/SAML)
-- **Database**: [MongoDB](https://www.mongodb.com/) with [Mongoose](https://mongoosejs.com/)
-- **Styling**: [Tailwind CSS v4](https://tailwindcss.com/)
-- **Animations**: [Motion](https://motion.dev/)
+- Next.js App Router backend + UI shell
+- Multi-provider LLM orchestration across Gemini, OpenAI, and Claude
+- Prompt-alignment ensemble mode for higher instruction fidelity on text generations
+- Gemini 2.0 Flash integration for chat + tool use + multimodal document analysis
+- MongoDB lending knowledge base (`lending_products`) and partner brief storage
+- Redis caching + conversation memory
+- GPS backend bridge layer with partner-scope enforcement
+- WhatsApp integration wrapper (Meta direct API, feature-flagged)
+- Soft-check engine (five-layer eligibility logic)
+- Morning briefing generator + cron worker
+- Unit tests with Vitest
 
-##  Getting Started
+## Architecture
 
-### Prerequisites
+### Agent 1: `myra-web`
 
-- Node.js 18+
-- MongoDB instance
-- Google Gemini API Key
-- Scalekit API Key and Configuration
+Path: `src/agents/web`
 
-### Environment Variables
+- Handles public loan product/rate/document/process questions
+- Uses knowledge and comparison tools
+- Provides FOIR-based indicative eligibility only
+- Captures leads naturally when intent is clear
+- Never asks for Aadhaar/PAN/account/OTP
+- No write access to CRM/partner pipeline
 
-Create a `.env.local` file in the root directory and add the following:
+API endpoint:
+- `POST /api/chat/web`
+
+### Agent 2: `myra-crm`
+
+Path: `src/agents/crm`
+
+- Multi-step tool-calling agent loop (max 8 iterations)
+- Supports:
+  - WhatsApp outreach
+  - Document analysis + checklist gaps
+  - Soft-check execution
+  - Pipeline and commission queries
+  - Partner notes
+  - Morning briefing generation
+
+API endpoint:
+- `POST /api/chat/crm` (requires valid partner JWT)
+
+## Key API routes
+
+- `POST /api/chat/web`
+- `POST /api/chat/crm`
+- `POST /api/webhooks/briefing-cron` (requires `x-briefing-secret`)
+- `GET /api/partner/briefing/today` (partner JWT required)
+
+## Environment variables
+
+Create a local `.env` from `.env.example` and keep real secrets out of version control:
 
 ```env
-# Database
-MONGODB_URI=your_mongodb_uri
-
-# Gemini AI
+MONGODB_URI=mongodb+srv://username:password@cluster.example.mongodb.net/agent
+GPS_INDIA_API_URL=http://localhost:4000
+GPS_INDIA_WEBHOOK_URL=http://localhost:4000/internal/ops/chat-escalation
 GEMINI_API_KEY=your_gemini_api_key
-
-# Scalekit (Authentication)
-SCALEKIT_BASE_URL=your_scalekit_base_url
-SCALEKIT_CLIENT_ID=your_scalekit_client_id
-SCALEKIT_CLIENT_SECRET=your_scalekit_client_secret
-SCALEKIT_REDIRECT_URI=http://localhost:3000/api/auth/callback
+OPENAI_API_KEY=your_openai_api_key
+CLAUDE_API_KEY=your_claude_api_key
+REDIS_URL=redis://127.0.0.1:6379
+CHAT_ALLOWED_ORIGINS=http://localhost:3000
+CHAT_RATE_LIMIT_MAX=30
+CHAT_RATE_LIMIT_WINDOW_MS=60000
 ```
 
-### Installation
+Notes:
+- `.env` is ignored and should remain local-only.
+- `.env.example` is placeholder-only and safe to commit.
+- `LLM_ORCHESTRATION_MODE` is optional. Leave it unset for single-provider fallback, or set it to `ensemble` only when you explicitly want the higher-cost synthesis path.
+- The previously exposed provider/database keys must still be rotated manually outside the repo.
+
+## Install and run
 
 ```bash
 npm install
-```
-
-### Running the Development Server
-
-```bash
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the outcome.
+## Tests
 
-## 📂 Project Structure
+```bash
+npm test
+```
 
-- `src/app`: Application routes and API endpoints.
-  - `src/app/dashboard`: Admin dashboard for managing bot settings.
-  - `src/app/embed`: The embeddable chat widget interface.
-  - `src/app/api`: Backend APIs (Chat, Auth, Settings).
-- `src/components`: Reusable UI components (Home, Dashboard, Chat).
-- `src/lib`: Utility functions and library initializations (DB, Scalekit).
-- `src/model`: MongoDB data models.
+Current unit tests cover:
+- CRM agent loop behavior
+- Soft-check logic
+- WhatsApp consent/rate-limit behavior
+- Chat auth
+- Document analysis redaction/checklist
+- Web eligibility and product comparison tools
 
-## 📄 License
+## Data seeding
 
-This project is private and proprietary.
+Seed lending products into MongoDB using your TypeScript runner:
+
+```bash
+npx tsx src/jobs/seedKnowledge.ts
+```
+
+Review seed data before importing:
+- `KNOWLEDGE_BASE_SEED.md`
+
+## Briefing job
+
+Standalone scheduler:
+- `src/jobs/morningBriefing.ts`
+- Runs daily at 7:00 AM IST (`Asia/Kolkata`)
+- Executes only if `ENABLE_MORNING_BRIEF=true`
+
+## Security model
+
+- CRM endpoint rejects unauthenticated requests
+- Partner scope enforced in `gpsBridge` (not only at prompt layer)
+- WhatsApp send path checks consent + per-partner rate limits
+- Document analysis stores only redacted structured fields (no raw documents)
+- Cron webhook validates secret header before running
+
+## Additional docs
+
+- `PLAN.md`: build scope, backend dependencies, rollout checklist, test order
+- `KNOWLEDGE_BASE_SEED.md`: lender/product seed review sheet
+
+## Tech stack
+
+- Next.js (App Router) + TypeScript
+- Node.js
+- MongoDB + Mongoose
+- Redis + ioredis
+- Gemini (`@google/genai`, `gemini-2.0-flash`)
+- OpenAI Chat Completions
+- Anthropic Claude Messages API
+- Vitest (unit tests)
+
+## License
+
+Private and proprietary.

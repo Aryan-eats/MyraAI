@@ -1,2 +1,19 @@
 @import "tailwindcss";
 
+:root {
+  --bg-start: #ffffff;
+  --bg-end: #f4f4f5;
+  --surface: #ffffff;
+  --surface-soft: #fafafa;
+  --border: #e4e4e7;
+  --text: #18181b;
+  --text-muted: #52525b;
+  --brand: #111111;
+  --brand-contrast: #ffffff;
+}
+
+html,
+body {
+  background: linear-gradient(135deg, var(--bg-start), var(--bg-end));
+  color: var(--text);
+}
