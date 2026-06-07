@@ -1,21 +1,10 @@
-import EmbedClient from '@/components/EmbedClient'
-import { getSession } from '@/lib/getSession'
-import { redirect } from 'next/navigation'
-import React from 'react'
+import { Suspense } from "react"
+import EmbedChat from "@/components/Chat/EmbedChat"
 
-async function page() {
-    const session=await getSession()
-    const ownerId = session?.user?.id
-
-    if (!ownerId) {
-      redirect('/')
-    }
-
+export default function EmbedPage() {
   return (
-    <>
-      <EmbedClient ownerId={ownerId}/>
-    </>
+    <Suspense fallback={<div className="p-6 text-sm">Loading chat...</div>}>
+      <EmbedChat />
+    </Suspense>
   )
 }
-
-export default page

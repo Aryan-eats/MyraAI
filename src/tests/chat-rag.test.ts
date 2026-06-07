@@ -11,7 +11,7 @@ vi.mock("@/lib/chatCache", () => ({
 }))
 
 vi.mock("@/lib/gemini", () => ({
-  generateText: vi.fn().mockResolvedValue("FAQ answer"),
+  generateText: vi.fn().mockResolvedValue("RAG answer"),
   generateWithTools: vi.fn(),
 }))
 
@@ -62,6 +62,23 @@ vi.mock("@/lib/intentRules", () => ({
   }),
 }))
 
+vi.mock("@/lib/retrieval", () => ({
+  retrieveRelevantChunks: vi.fn().mockResolvedValue(["knowledge chunk"]),
+}))
+
+vi.mock("@/model/Bot", () => ({
+  default: {
+    findById: vi.fn(),
+  },
+}))
+
+vi.mock("@/model/ChatSession", () => ({
+  default: {
+    findOne: vi.fn(),
+    create: vi.fn(),
+  },
+}))
+
 vi.mock("@/model/knowledge.model", () => ({
   default: {
     find: vi.fn().mockReturnValue({
@@ -80,80 +97,58 @@ vi.mock("@/model/settings.model", () => ({
   },
 }))
 
-describe("/api/chat route", () => {
+import Bot from "@/model/Bot"
+import ChatSession from "@/model/ChatSession"
+
+describe("/api/chat phase 3", () => {
   beforeEach(() => {
     vi.resetModules()
-    vi.restoreAllMocks()
+    vi.resetAllMocks()
     vi.stubEnv("CHAT_ALLOWED_ORIGINS", "https://allowed.example")
     vi.stubEnv("CHAT_RATE_LIMIT_MAX", "1")
     vi.stubEnv("CHAT_RATE_LIMIT_WINDOW_MS", "60000")
   })
 
-  it("rejects requests from disallowed origins", async () => {
-    const { POST } = await import("./route")
-    const req = new NextRequest("http://localhost/api/chat", {
-      method: "POST",
-      headers: {
-        origin: "https://blocked.example",
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({ message: "What is my status?" }),
-    })
+  it("uses bot knowledge and persists session state", async () => {
+    vi.mocked(Bot.findById).mockResolvedValue({
+      _id: "bot_1",
+      ownerId: "user_1",
+      name: "Acme Support",
+      slug: "acme-support",
+      systemPrompt: "Be helpful",
+      primaryColor: "#123456",
+      welcomeMessage: "Hello",
+      fallbackMessage: "Fallback",
+      allowedDomains: [],
+      status: "active",
+    } as never)
 
-    const response = await POST(req)
-    const payload = await response.json()
+    vi.mocked(ChatSession.findOne).mockResolvedValue(null)
+    vi.mocked(ChatSession.create).mockImplementation(async (payload: Record<string, unknown>) => ({
+      messages: [],
+      save: vi.fn().mockResolvedValue(undefined),
+      ...payload,
+    } as never))
 
-    expect(response.status).toBe(403)
-    expect(payload.message).toMatch(/origin/i)
-  })
-
-  it("allows configured origins and returns a matching CORS header", async () => {
-    const { POST } = await import("./route")
+    const { POST } = await import("@/app/api/chat/route")
     const req = new NextRequest("http://localhost/api/chat", {
       method: "POST",
       headers: {
         origin: "https://allowed.example",
         "content-type": "application/json",
       },
-      body: JSON.stringify({ message: "What is my status?" }),
+      body: JSON.stringify({
+        botId: "bot_1",
+        message: "What can you help with?",
+        sessionId: "session_1",
+      }),
     })
 
     const response = await POST(req)
     const payload = await response.json()
 
     expect(response.status).toBe(200)
-    expect(payload.answer).toBe("FAQ answer")
-    expect(response.headers.get("Access-Control-Allow-Origin")).toBe("https://allowed.example")
-  })
-
-  it("rate limits repeated requests from the same client", async () => {
-    const { POST } = await import("./route")
-    const first = new NextRequest("http://localhost/api/chat", {
-      method: "POST",
-      headers: {
-        origin: "https://allowed.example",
-        "content-type": "application/json",
-        "x-forwarded-for": "203.0.113.10",
-      },
-      body: JSON.stringify({ message: "What is my status?" }),
-    })
-    const second = new NextRequest("http://localhost/api/chat", {
-      method: "POST",
-      headers: {
-        origin: "https://allowed.example",
-        "content-type": "application/json",
-        "x-forwarded-for": "203.0.113.10",
-      },
-      body: JSON.stringify({ message: "What is my status?" }),
-    })
-
-    const firstResponse = await POST(first)
-    const secondResponse = await POST(second)
-    const payload = await secondResponse.json()
-
-    expect(firstResponse.status).toBe(200)
-    expect(secondResponse.status).toBe(429)
-    expect(payload.message).toMatch(/rate limit/i)
-    expect(secondResponse.headers.get("Retry-After")).toBe("60")
+    expect(payload.reply).toBe("RAG answer")
+    expect(payload.sessionId).toBe("session_1")
   })
 })

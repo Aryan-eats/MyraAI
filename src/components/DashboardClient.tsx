@@ -46,6 +46,7 @@ function DashboardClient({ ownerId }: { ownerId: string }) {
   }, [ownerId])
 
   const quickActions = [
+    { title: "Manage Bots", desc: "Create bots, edit settings, and manage embedded assistants.", href: "/dashboard/bots" },
     { title: "Open CRM Copilot", desc: "Ask about blocked files, reminders, or commissions.", href: `/chat?mode=crm&ownerId=${ownerId}` },
     { title: "Test Web Advisor", desc: "Validate borrower-facing guidance and product coverage.", href: "/chat?mode=web" },
     { title: "Embed Assistant", desc: "Deploy the website chat widget with your owner key.", href: "/embed" },

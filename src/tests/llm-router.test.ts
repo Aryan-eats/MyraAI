@@ -23,7 +23,7 @@ describe("llm router", () => {
     vi.stubEnv("CLAUDE_API_KEY", "claude-test-key")
     vi.stubEnv("LLM_PROVIDER_ORDER", "claude")
 
-    const { hasConfiguredLlmProvider } = await import("./router")
+    const { hasConfiguredLlmProvider } = await import("@/lib/llm/router")
 
     expect(hasConfiguredLlmProvider()).toBe(true)
   })
@@ -41,7 +41,7 @@ describe("llm router", () => {
 
     vi.stubGlobal("fetch", fetchMock)
 
-    const { generateText } = await import("./router")
+    const { generateText } = await import("@/lib/llm/router")
     const result = await generateText({ message: "Say hello", temperature: 0 })
 
     expect(result).toBe("Claude response")
@@ -92,7 +92,7 @@ describe("llm router", () => {
 
     vi.stubGlobal("fetch", fetchMock)
 
-    const { generateText } = await import("./router")
+    const { generateText } = await import("@/lib/llm/router")
     const result = await generateText({
       systemInstruction: "Answer precisely.",
       message: "Write a concise reply.",
@@ -117,7 +117,7 @@ describe("llm router", () => {
 
     vi.stubGlobal("fetch", fetchMock)
 
-    const { generateText } = await import("./router")
+    const { generateText } = await import("@/lib/llm/router")
     const result = await generateText({
       systemInstruction: "Answer precisely.",
       message: "Write a concise reply.",

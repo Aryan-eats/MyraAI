@@ -3,7 +3,7 @@ import { scalekit } from "@/lib/ScaleKit";
 
 export async function getSession(){
     const session=await cookies()
-    const token=session.get("access_token")?.value
+    const token=session.get("myra_session")?.value ?? session.get("access_token")?.value
     if(!token){
         return null
     }

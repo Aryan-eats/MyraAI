@@ -1,6 +1,8 @@
 import ChatClient from "@/components/ChatClient"
 import { getSession } from "@/lib/getSession"
 
+export const dynamic = "force-dynamic"
+
 type ChatPageProps = {
   searchParams?: Promise<{ ownerId?: string; mode?: string }>
 }

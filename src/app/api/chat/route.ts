@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
+import { z } from "zod"
 import connectDb from "@/lib/db"
 import {
   applyCorsHeaders,
@@ -15,6 +16,9 @@ import { generateText, generateWithTools } from "@/lib/gemini"
 import { hasConfiguredLlmProvider } from "@/lib/llm/router"
 import { getChatUser } from "@/lib/chatAuth"
 import { escalateConversation } from "@/lib/escalation"
+import Bot from "@/model/Bot"
+import ChatSession, { type IChatMessage } from "@/model/ChatSession"
+import { retrieveRelevantChunks } from "@/lib/retrieval"
 import {
   GEMINI_TOOL_DECLARATIONS,
   INTENT_CLASSIFIER_PROMPT,
@@ -45,8 +49,16 @@ const allowedOrigins = getChatAllowedOrigins()
 type ChatBody = {
   message: string
   ownerId?: string
+  botId?: string
+  sessionId?: string
   conversation?: Array<{ role: "user" | "assistant"; text: string }>
 }
+
+const botChatSchema = z.object({
+  botId: z.string().min(1),
+  message: z.string().min(1).max(2000),
+  sessionId: z.string().optional(),
+})
 
 function jsonResponse(payload: Record<string, unknown>, status = 200, allowedOrigin: string | null = null) {
   const response = NextResponse.json(payload, { status })
@@ -83,6 +95,69 @@ function parseJsonObject(raw: string): Record<string, unknown> | null {
     }
     return null
   }
+}
+
+function formatRecentMessages(messages: IChatMessage[]) {
+  return messages
+    .map((message) => `${message.role.toUpperCase()}: ${message.content}`)
+    .join("\n")
+}
+
+async function runBotChatFlow(req: NextRequest, body: ChatBody, allowedOrigin: string | null) {
+  const parsedBody = botChatSchema.parse(body)
+  const bot = await Bot.findById(parsedBody.botId)
+
+  if (!bot || bot.status !== "active") {
+    return jsonResponse({ error: "Bot not found or inactive", code: "BOT_NOT_FOUND" }, 404, allowedOrigin)
+  }
+
+  const sessionId = parsedBody.sessionId ?? crypto.randomUUID()
+  let session = await ChatSession.findOne({ sessionId })
+
+  if (!session) {
+    session = await ChatSession.create({
+      botId: parsedBody.botId,
+      sessionId,
+      visitorId: req.headers.get("x-forwarded-for") ?? "anonymous",
+      messages: [],
+    })
+  }
+
+  const relevantChunks = await retrieveRelevantChunks(parsedBody.botId, parsedBody.message)
+  const knowledgeContext =
+    relevantChunks.length > 0
+      ? `Relevant knowledge:\n${relevantChunks.map((chunk, index) => `[${index + 1}] ${chunk}`).join("\n\n")}`
+      : "Relevant knowledge:\nNo relevant knowledge found."
+
+  const recentMessages = session.messages.slice(-10)
+  const historyContext = recentMessages.length > 0 ? `Recent conversation:\n${formatRecentMessages(recentMessages)}` : ""
+
+  const systemPrompt = [
+    bot.systemPrompt,
+    "",
+    `Only answer using the knowledge below. If the answer is not present, say: "${bot.fallbackMessage}"`,
+    "Do not make up information.",
+    "Be concise and helpful.",
+    knowledgeContext,
+    historyContext,
+  ]
+    .filter(Boolean)
+    .join("\n\n")
+
+  const reply =
+    (await generateText({
+      systemInstruction: systemPrompt,
+      message: parsedBody.message,
+      temperature: 0.2,
+    })) || bot.fallbackMessage
+
+  session.messages.push(
+    { role: "user", content: parsedBody.message, timestamp: new Date() },
+    { role: "assistant", content: reply, timestamp: new Date() },
+  )
+  await session.save()
+
+  return jsonResponse({ reply, answer: reply, sessionId }, 200, allowedOrigin)
 }
 
 function sanitizeClassification(raw: Record<string, unknown> | null): IntentClassification {
@@ -260,6 +335,11 @@ export async function POST(req: NextRequest) {
     const body = (await req.json()) as ChatBody
     if (!body.message) {
       return jsonResponse({ message: "message is required" }, 400, allowedOrigin)
+    }
+
+    if (body.botId) {
+      const botResponse = await runBotChatFlow(req, body, allowedOrigin)
+      return botResponse
     }
 
     const chatUser = await getChatUser(req)
