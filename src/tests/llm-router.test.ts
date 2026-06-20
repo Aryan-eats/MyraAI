@@ -1,11 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
+const genAiMock = vi.hoisted(() => ({
+  generateContent: vi.fn(),
+}))
+
 vi.mock("@google/genai", () => ({
-  GoogleGenAI: vi.fn(() => ({
-    models: {
-      generateContent: vi.fn(),
-    },
-  })),
+  GoogleGenAI: vi.fn(function GoogleGenAI() {
+    return {
+      models: {
+        generateContent: genAiMock.generateContent,
+      },
+    }
+  }),
 }))
 
 describe("llm router", () => {
@@ -13,6 +19,7 @@ describe("llm router", () => {
     vi.resetModules()
     vi.unstubAllEnvs()
     vi.restoreAllMocks()
+    genAiMock.generateContent.mockReset()
   })
 
   afterEach(() => {
@@ -56,53 +63,6 @@ describe("llm router", () => {
     )
   })
 
-  it("uses ensemble synthesis for text generation when enabled", async () => {
-    vi.stubEnv("OPENAI_API_KEY", "openai-test-key")
-    vi.stubEnv("CLAUDE_API_KEY", "claude-test-key")
-    vi.stubEnv("LLM_PROVIDER_ORDER", "openai,claude")
-    vi.stubEnv("LLM_ORCHESTRATION_MODE", "ensemble")
-    vi.stubEnv("LLM_SYNTHESIS_PROVIDER", "claude")
-
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input)
-      const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : {}
-
-      if (url.includes("openai.com")) {
-        return {
-          ok: true,
-          json: async () => ({
-            choices: [{ message: { content: "OpenAI draft" } }],
-          }),
-        }
-      }
-
-      const messages = Array.isArray(body.messages) ? (body.messages as Array<Record<string, unknown>>) : []
-      const firstMessage = messages[0] as Record<string, unknown> | undefined
-      const contentBlocks = Array.isArray(firstMessage?.content) ? (firstMessage.content as Array<Record<string, unknown>>) : []
-      const promptText = typeof contentBlocks[0]?.text === "string" ? contentBlocks[0].text : ""
-      const text = promptText.includes("Candidate drafts:") ? "Aligned final" : "Claude draft"
-
-      return {
-        ok: true,
-        json: async () => ({
-          content: [{ type: "text", text }],
-        }),
-      }
-    })
-
-    vi.stubGlobal("fetch", fetchMock)
-
-    const { generateText } = await import("@/lib/llm/router")
-    const result = await generateText({
-      systemInstruction: "Answer precisely.",
-      message: "Write a concise reply.",
-      temperature: 0.2,
-    })
-
-    expect(result).toBe("Aligned final")
-    expect(fetchMock).toHaveBeenCalledTimes(3)
-  })
-
   it("defaults to single-provider fallback when orchestration mode is unset", async () => {
     vi.stubEnv("OPENAI_API_KEY", "openai-test-key")
     vi.stubEnv("CLAUDE_API_KEY", "claude-test-key")
@@ -125,6 +85,85 @@ describe("llm router", () => {
     })
 
     expect(result).toBe("OpenAI direct")
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("uses Gemini 2.5 Flash as the default text provider", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "gemini-test-key")
+    genAiMock.generateContent.mockResolvedValue({ text: "Gemini direct" })
+
+    const { generateText, hasConfiguredLlmProvider } = await import("@/lib/llm/router")
+    const result = await generateText({
+      systemInstruction: "Answer precisely.",
+      message: "Write a concise reply.",
+      temperature: 0.2,
+    })
+
+    expect(hasConfiguredLlmProvider()).toBe(true)
+    expect(result).toBe("Gemini direct")
+    expect(genAiMock.generateContent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: "gemini-2.5-flash",
+      }),
+    )
+  })
+
+  it("falls back to OpenRouter by default when Gemini fails", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "gemini-test-key")
+    vi.stubEnv("OPENROUTER_API_KEY", "openrouter-test-key")
+    genAiMock.generateContent.mockRejectedValue(new Error("gemini unavailable"))
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [{ message: { content: "OpenRouter direct" } }],
+      }),
+    })
+    vi.stubGlobal("fetch", fetchMock)
+
+    const { generateText } = await import("@/lib/llm/router")
+    const result = await generateText({
+      systemInstruction: "Answer precisely.",
+      message: "Write a concise reply.",
+      temperature: 0.2,
+    })
+
+    expect(result).toBe("OpenRouter direct")
+    expect(genAiMock.generateContent).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://openrouter.ai/api/v1/chat/completions",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          Authorization: "Bearer openrouter-test-key",
+        }),
+        body: expect.stringContaining('"model":"meta-llama/llama-3.3-70b-instruct:free"'),
+      }),
+    )
+  })
+
+  it("does not use Claude from the default provider order", async () => {
+    vi.stubEnv("OPENROUTER_API_KEY", "openrouter-test-key")
+    vi.stubEnv("CLAUDE_API_KEY", "claude-test-key")
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 429,
+        text: async () => "rate limited",
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          content: [{ type: "text", text: "Claude fallback" }],
+        }),
+      })
+    vi.stubGlobal("fetch", fetchMock)
+
+    const { generateText } = await import("@/lib/llm/router")
+    await expect(generateText({ message: "Say hello" })).rejects.toThrow("All configured LLM providers failed")
+
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 })

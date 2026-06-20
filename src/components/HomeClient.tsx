@@ -1,8 +1,6 @@
 'use client'
 
 import React, { useEffect, useRef, useState } from "react"
-import { AnimatePresence, motion } from "motion/react"
-import axios from "axios"
 import { useRouter } from "next/navigation"
 
 function HomeClient({ email = "", ownerId = "" }: { email?: string; ownerId?: string }) {
@@ -45,7 +43,7 @@ function HomeClient({ email = "", ownerId = "" }: { email?: string; ownerId?: st
 
   const handleLogout = async () => {
     try {
-      await axios.get("/api/auth/logout")
+      await fetch("/api/auth/logout")
       window.location.href = "/"
     } catch (error) {
       console.log(error)
@@ -54,10 +52,7 @@ function HomeClient({ email = "", ownerId = "" }: { email?: string; ownerId?: st
 
   return (
     <div className="min-h-screen overflow-x-hidden">
-      <motion.div
-        initial={{ y: -50 }}
-        animate={{ y: 0 }}
-        transition={{ duration: 0.5 }}
+      <div
         className="fixed top-0 left-0 w-full z-50 border-b backdrop-blur-xl"
         style={{
           backgroundColor: "color-mix(in srgb, var(--surface) 82%, transparent)",
@@ -76,12 +71,9 @@ function HomeClient({ email = "", ownerId = "" }: { email?: string; ownerId?: st
               >
                 {firstLetter}
               </button>
-              <AnimatePresence>
+              
                 {open && (
-                  <motion.div
-                    initial={{ opacity: 0, y: -6 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -6 }}
+                  <div
                     className="absolute right-0 mt-3 w-44 rounded-xl shadow-xl border overflow-hidden"
                     style={{ backgroundColor: "var(--surface)", borderColor: "var(--border)" }}
                   >
@@ -94,9 +86,9 @@ function HomeClient({ email = "", ownerId = "" }: { email?: string; ownerId?: st
                     <button className="w-full text-left px-4 py-3 text-sm text-red-600 hover:bg-zinc-100" onClick={handleLogout}>
                       Logout
                     </button>
-                  </motion.div>
+                  </div>
                 )}
-              </AnimatePresence>
+              
             </div>
           ) : (
             <button
@@ -108,11 +100,11 @@ function HomeClient({ email = "", ownerId = "" }: { email?: string; ownerId?: st
             </button>
           )}
         </div>
-      </motion.div>
+      </div>
 
       <section className="pt-36 pb-28 px-6">
         <div className="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-20 items-center">
-          <motion.div initial={{ opacity: 0, y: 40 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7 }}>
+          <div>
             <h1 className="text-4xl md:text-5xl font-semibold leading-tight tracking-tight">
               Dual-Agent Lending AI
               <br />
@@ -154,12 +146,9 @@ function HomeClient({ email = "", ownerId = "" }: { email?: string; ownerId?: st
                 Open CRM Copilot
               </button>
             </div>
-          </motion.div>
+          </div>
 
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ duration: 0.7, delay: 0.2 }}
+          <div
             className="relative"
           >
             <div className="rounded-2xl shadow-2xl border p-6" style={{ backgroundColor: "var(--surface)", borderColor: "var(--border)" }}>
@@ -178,30 +167,22 @@ function HomeClient({ email = "", ownerId = "" }: { email?: string; ownerId?: st
                 </div>
               </div>
             </div>
-          </motion.div>
+          </div>
         </div>
       </section>
 
       <section className="py-28 px-6 border-t" style={{ backgroundColor: "var(--surface-soft)", borderColor: "var(--border)" }}>
         <div className="max-w-6xl mx-auto">
-          <motion.h2
-            initial={{ opacity: 0, y: 20 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: false }}
-            transition={{ duration: 0.5 }}
+          <h2
             className="text-3xl font-semibold text-center"
           >
             What the Platform Delivers
-          </motion.h2>
+          </h2>
 
           <div className="mt-16 grid grid-cols-1 md:grid-cols-3 gap-10">
-            {features.map((feature, index) => (
-              <motion.div
+            {features.map((feature) => (
+              <div
                 key={feature.title}
-                initial={{ opacity: 0, y: 30 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                transition={{ delay: index * 0.1 }}
-                viewport={{ once: false }}
                 className="rounded-2xl p-8 shadow-lg border"
                 style={{ backgroundColor: "var(--surface)", borderColor: "var(--border)" }}
               >
@@ -209,7 +190,7 @@ function HomeClient({ email = "", ownerId = "" }: { email?: string; ownerId?: st
                 <p className="mt-3 text-sm" style={{ color: "var(--text-muted)" }}>
                   {feature.desc}
                 </p>
-              </motion.div>
+              </div>
             ))}
           </div>
         </div>

@@ -1,8 +1,18 @@
 import { NextRequest } from "next/server"
-import { jwtVerify, importSPKI } from "jose"
+import { jwtVerify, importSPKI, decodeJwt } from "jose"
 import type { AuthenticatedPartner } from "@/types/agents"
+import { hasPostgres } from "@/lib/pgClient"
+import { resolvePartnerOrgForUser } from "@/lib/crmDb"
+import { ADMIN_ROLES, getUser } from "@/lib/adminDb"
 
 export type ChatUserRole = "customer" | "partner" | "admin" | "anonymous"
+
+export type AuthenticatedAdmin = {
+  userId: string
+  role: string
+  name: string
+  token: string
+}
 
 export type ChatUser = {
   userId: string
@@ -54,6 +64,16 @@ async function fetchMe(token: string): Promise<MeResponse | null> {
     }
 
     return (await response.json()) as MeResponse
+  } catch {
+    return null
+  }
+}
+
+/** Read the subject (user ID) from a JWT without verifying its signature. */
+function getJwtSubject(token: string): string | null {
+  try {
+    const payload = decodeJwt(token)
+    return typeof payload.sub === "string" ? payload.sub : null
   } catch {
     return null
   }
@@ -117,6 +137,27 @@ export async function requirePartnerAuth(req: NextRequest): Promise<Authenticate
   }
 
   const me = await fetchMe(token)
+
+  // Primary path: resolve the partner org scope from the GPS India database.
+  if (hasPostgres()) {
+    const userId = me?.userId ?? getJwtSubject(token)
+    if (!userId) {
+      return null
+    }
+    const org = await resolvePartnerOrgForUser(userId)
+    if (!org) {
+      return null
+    }
+    return {
+      userId,
+      partnerId: org.partnerOrgId,
+      partnerName: me?.name ?? org.name,
+      partnerTier: me?.tier ?? "standard",
+      token,
+    }
+  }
+
+  // Legacy path: trust the GPS API /me role and entityId.
   if (!me || me.userRole !== "partner" || !me.entityId) {
     return null
   }
@@ -128,6 +169,43 @@ export async function requirePartnerAuth(req: NextRequest): Promise<Authenticate
     partnerTier: me.tier ?? "standard",
     token,
   }
+}
+
+/**
+ * Require an admin-role user for the admin chatbot. When PostgreSQL is
+ * configured the role is read from the `users` table (authoritative); otherwise
+ * the GPS API /me role is used.
+ */
+export async function requireAdminAuth(req: NextRequest): Promise<AuthenticatedAdmin | null> {
+  const token = getTokenFromRequest(req)
+  if (!token) {
+    return null
+  }
+
+  const sigOk = await verifyJwtSignatureIfConfigured(token)
+  if (!sigOk) {
+    return null
+  }
+
+  const me = await fetchMe(token)
+
+  if (hasPostgres()) {
+    const userId = me?.userId ?? getJwtSubject(token)
+    if (!userId) {
+      return null
+    }
+    const user = await getUser(userId)
+    if (!user || !user.isActive || !(ADMIN_ROLES as readonly string[]).includes(user.role)) {
+      return null
+    }
+    return { userId, role: user.role, name: me?.name ?? user.fullName, token }
+  }
+
+  // Legacy path: trust the GPS API /me role.
+  if (!me || me.userRole !== "admin") {
+    return null
+  }
+  return { userId: me.userId, role: "admin", name: me.name ?? "Admin", token }
 }
 
 export function requireSessionId(req: NextRequest): string {

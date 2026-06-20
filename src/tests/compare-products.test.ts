@@ -32,8 +32,10 @@ describe("compareProducts", () => {
 
     const result = await compareProducts({ productType: "personal_loan", amount: 500000 })
 
-    expect(result[0].lenderName).toBe("Bank A")
-    expect(result[0].rateRange).toBe("10.5-17%")
-    expect(result[1].lenderName).toBe("Bank B")
+    // With no DATABASE_URL configured this exercises the MongoDB fallback path.
+    expect(result.source).toBe("mongo")
+    expect(result.comparison[0].bankName).toBe("Bank A")
+    expect(result.comparison[0].rateRange).toBe("10.5-17%")
+    expect(result.comparison[1].bankName).toBe("Bank B")
   })
 })

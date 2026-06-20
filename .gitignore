@@ -19,7 +19,9 @@
 
 # production
 /build
-/docs
+/docs/*
+!/docs/learn/
+!/docs/learn/**
 /superpowers
 
 # misc

@@ -9,13 +9,16 @@ vi.mock("@/agents/crm/tools/generateBriefing", () => ({ generateBriefing: vi.fn(
 vi.mock("@/agents/crm/tools/addPartnerNote", () => ({ addPartnerNote: vi.fn() }))
 vi.mock("@/agents/crm/tools/queryPipeline", () => ({ queryPipeline: vi.fn() }))
 vi.mock("@/agents/crm/tools/getCommissions", () => ({ getCommissions: vi.fn() }))
+vi.mock("@/lib/loanAnswering", () => ({ answerLoanQuestion: vi.fn() }))
 
 import { runCrmAgent } from "@/agents/crm/agent"
 import { generateWithTools } from "@/lib/gemini"
 import { queryPipeline } from "@/agents/crm/tools/queryPipeline"
+import { answerLoanQuestion } from "@/lib/loanAnswering"
 
 const mockGenerateWithTools = vi.mocked(generateWithTools)
 const mockQueryPipeline = vi.mocked(queryPipeline)
+const mockAnswerLoanQuestion = vi.mocked(answerLoanQuestion)
 
 const partner = {
   userId: "u1",
@@ -59,5 +62,32 @@ describe("runCrmAgent", () => {
     expect(mockQueryPipeline).toHaveBeenCalledOnce()
     expect(result.text).toContain("2 active leads")
     expect(result.toolsUsed).toContain("query_pipeline")
+  })
+
+  it("can answer general loan questions through the shared loan knowledge tool", async () => {
+    mockAnswerLoanQuestion.mockResolvedValueOnce({
+      source: "postgres",
+      marking: "Source: GPS India database",
+      data: { loanType: "personal_loan", count: 3 },
+    })
+
+    mockGenerateWithTools
+      .mockResolvedValueOnce({
+        candidates: [
+          {
+            content: {
+              parts: [{ functionCall: { name: "search_loan_knowledge", args: { query: "personal loan rates" } } }],
+            },
+          },
+        ],
+      } as never)
+      .mockResolvedValueOnce({
+        candidates: [{ content: { parts: [{ text: "I found personal loan rates." }] } }],
+      } as never)
+
+    const result = await runCrmAgent("personal loan rates", [], partner)
+
+    expect(mockAnswerLoanQuestion).toHaveBeenCalledWith({ query: "personal loan rates" })
+    expect(result.toolsUsed).toContain("search_loan_knowledge")
   })
 })

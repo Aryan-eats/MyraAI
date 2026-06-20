@@ -11,7 +11,7 @@ type ToolBundle = {
   functionDeclarations: readonly ToolDeclaration[]
 }
 
-type ProviderName = "gemini" | "openai" | "claude"
+type ProviderName = "openrouter" | "gemini" | "openai" | "claude"
 
 type GenerateWithToolsParams = {
   systemInstruction: string
@@ -44,11 +44,25 @@ export type UnifiedGenerateResult = {
   }>
 }
 
-type OpenAiMessage =
-  | { role: "system"; content: string }
-  | { role: "user"; content: string }
-  | { role: "assistant"; content: string | null; tool_calls?: Array<{ id: string; type: "function"; function: { name: string; arguments: string } }> }
-  | { role: "tool"; tool_call_id: string; name: string; content: string }
+type OpenAiMessage = {
+  role: "system" | "user" | "assistant" | "tool"
+  content?: string | null
+  tool_calls?: Array<{
+    id: string
+    type: "function"
+    function: { name: string; arguments: string }
+  }>
+  tool_call_id?: string
+}
+
+type OpenAiTool = {
+  type: "function"
+  function: {
+    name: string
+    description?: string
+    parameters: Record<string, unknown>
+  }
+}
 
 type ClaudeContentBlock =
   | { type: "text"; text: string }
@@ -60,19 +74,12 @@ type ClaudeMessage = {
   content: ClaudeContentBlock[]
 }
 
-type ProviderDraft = {
-  provider: ProviderName
-  text: string
-}
-
-const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.0-flash"
+const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+const OPENROUTER_MODEL = process.env.OPENROUTER_DEFAULT_MODEL || process.env.OPENROUTER_FREE_MODEL || "meta-llama/llama-3.3-70b-instruct:free"
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash"
 const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini"
 const CLAUDE_MODEL = process.env.CLAUDE_MODEL || "claude-3-7-sonnet-latest"
-const OPENROUTER_BASE_URL = process.env.OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1"
-const OPENROUTER_OPENAI_MODEL = process.env.OPENROUTER_OPENAI_MODEL || "openai/gpt-4o-mini"
-const OPENROUTER_CLAUDE_MODEL = process.env.OPENROUTER_CLAUDE_MODEL || "anthropic/claude-3.7-sonnet"
-const DEFAULT_PROVIDER_ORDER: ProviderName[] = ["gemini", "openai", "claude"]
-const ENSEMBLE_MODE = "ensemble"
+const DEFAULT_PROVIDER_ORDER: ProviderName[] = ["gemini", "openrouter"]
 
 function parseJsonObject(raw: string): Record<string, unknown> {
   try {
@@ -83,7 +90,7 @@ function parseJsonObject(raw: string): Record<string, unknown> {
 }
 
 function normalizeProvider(value: string): ProviderName | null {
-  if (value === "gemini" || value === "openai" || value === "claude") {
+  if (value === "openrouter" || value === "gemini" || value === "openai" || value === "claude") {
     return value
   }
   return null
@@ -95,8 +102,7 @@ function providerOrder() {
     .map((item) => item.trim().toLowerCase())
     .filter(Boolean)
 
-  const unique = Array.from(new Set(raw))
-  const providers = unique
+  const providers = Array.from(new Set(raw))
     .map(normalizeProvider)
     .filter((provider): provider is ProviderName => Boolean(provider))
 
@@ -107,22 +113,17 @@ function getClaudeApiKey() {
   return process.env.CLAUDE_API_KEY || process.env.ANTHROPIC_API_KEY || ""
 }
 
-function getOpenRouterApiKey() {
-  return process.env.OPENROUTER_API_KEY || ""
-}
-
-function shouldUseOpenRouterForProvider(provider: ProviderName) {
-  return (provider === "openai" || provider === "claude") && Boolean(getOpenRouterApiKey())
-}
-
 function hasProviderKey(provider: ProviderName) {
+  if (provider === "openrouter") {
+    return Boolean(process.env.OPENROUTER_API_KEY)
+  }
   if (provider === "gemini") {
     return Boolean(process.env.GEMINI_API_KEY)
   }
   if (provider === "openai") {
-    return Boolean(process.env.OPENAI_API_KEY) || shouldUseOpenRouterForProvider(provider)
+    return Boolean(process.env.OPENAI_API_KEY)
   }
-  return Boolean(getClaudeApiKey()) || shouldUseOpenRouterForProvider(provider)
+  return Boolean(getClaudeApiKey())
 }
 
 export function hasConfiguredLlmProvider() {
@@ -131,26 +132,6 @@ export function hasConfiguredLlmProvider() {
 
 function getEnabledProviders() {
   return providerOrder().filter((provider) => hasProviderKey(provider))
-}
-
-function orchestrationMode() {
-  const mode = process.env.LLM_ORCHESTRATION_MODE?.trim().toLowerCase()
-  return mode === ENSEMBLE_MODE ? ENSEMBLE_MODE : "fallback"
-}
-
-function synthesisProvider(preferredProviders: ProviderName[]) {
-  const requested = normalizeProvider((process.env.LLM_SYNTHESIS_PROVIDER || "").trim().toLowerCase())
-  if (requested && preferredProviders.includes(requested)) {
-    return requested
-  }
-  return preferredProviders[0]
-}
-
-function shouldUseEnsemble(params: GenerateTextParams, enabledProviders: ProviderName[]) {
-  if (params.jsonMode) {
-    return false
-  }
-  return orchestrationMode() === ENSEMBLE_MODE && enabledProviders.length >= 2
 }
 
 function toGeminiContents(messages: GeminiMessage[]) {
@@ -168,18 +149,17 @@ function toGeminiContents(messages: GeminiMessage[]) {
   })
 }
 
-function toOpenAiMessages(systemInstruction: string, messages: GeminiMessage[]): OpenAiMessage[] {
-  const openAiMessages: OpenAiMessage[] = [{ role: "system", content: systemInstruction }]
+function toOpenAiMessages(systemInstruction: string | undefined, messages: GeminiMessage[]): OpenAiMessage[] {
+  const openAiMessages: OpenAiMessage[] = systemInstruction ? [{ role: "system", content: systemInstruction }] : []
   const pendingToolCallIds: string[] = []
   let toolCounter = 0
 
   for (const message of messages) {
     if (typeof message.content === "string") {
-      if (message.role === "user") {
-        openAiMessages.push({ role: "user", content: message.content })
-      } else {
-        openAiMessages.push({ role: "assistant", content: message.content })
-      }
+      openAiMessages.push({
+        role: message.role === "model" ? "assistant" : "user",
+        content: message.content,
+      })
       continue
     }
 
@@ -188,7 +168,7 @@ function toOpenAiMessages(systemInstruction: string, messages: GeminiMessage[]):
     const functionResponses = message.content.parts.filter((part) => part.functionResponse)
 
     if (message.role === "model") {
-      if (functionCalls.length > 0) {
+      if (functionCalls.length) {
         const toolCalls = functionCalls.map((part) => {
           toolCounter += 1
           const id = `tool_${toolCounter}`
@@ -208,7 +188,7 @@ function toOpenAiMessages(systemInstruction: string, messages: GeminiMessage[]):
           content: textParts || null,
           tool_calls: toolCalls,
         })
-      } else {
+      } else if (textParts) {
         openAiMessages.push({ role: "assistant", content: textParts })
       }
       continue
@@ -219,13 +199,11 @@ function toOpenAiMessages(systemInstruction: string, messages: GeminiMessage[]):
     }
 
     for (const response of functionResponses) {
-      const fallbackId = `tool_${toolCounter + 1}`
-      const toolCallId = pendingToolCallIds.shift() || fallbackId
+      const toolCallId = pendingToolCallIds.shift() || `tool_${toolCounter + 1}`
       toolCounter += 1
       openAiMessages.push({
         role: "tool",
         tool_call_id: toolCallId,
-        name: response.functionResponse?.name || "unknown_tool",
         content: JSON.stringify(response.functionResponse?.response ?? {}),
       })
     }
@@ -234,11 +212,8 @@ function toOpenAiMessages(systemInstruction: string, messages: GeminiMessage[]):
   return openAiMessages
 }
 
-function toOpenAiTools(tools?: readonly ToolBundle[]) {
-  if (!tools?.length) {
-    return undefined
-  }
-  const declarations = tools.flatMap((bundle) => bundle.functionDeclarations || [])
+function toOpenAiTools(tools?: readonly ToolBundle[]): OpenAiTool[] | undefined {
+  const declarations = tools?.flatMap((bundle) => bundle.functionDeclarations || []) ?? []
   if (!declarations.length) {
     return undefined
   }
@@ -252,73 +227,9 @@ function toOpenAiTools(tools?: readonly ToolBundle[]) {
   }))
 }
 
-function toClaudeMessages(messages: GeminiMessage[]): ClaudeMessage[] {
-  const pendingToolCallIds: string[] = []
-  let toolCounter = 0
-  const claudeMessages: ClaudeMessage[] = []
-
-  for (const message of messages) {
-    const blocks: ClaudeContentBlock[] = []
-
-    if (typeof message.content === "string") {
-      blocks.push({ type: "text", text: message.content })
-    } else {
-      for (const part of message.content.parts) {
-        if (part.text) {
-          blocks.push({ type: "text", text: part.text })
-        }
-        if (message.role === "model" && part.functionCall) {
-          toolCounter += 1
-          const id = `tool_${toolCounter}`
-          pendingToolCallIds.push(id)
-          blocks.push({
-            type: "tool_use",
-            id,
-            name: part.functionCall.name,
-            input: part.functionCall.args || {},
-          })
-        }
-        if (message.role === "user" && part.functionResponse) {
-          const toolUseId = pendingToolCallIds.shift() || `tool_${toolCounter + 1}`
-          blocks.push({
-            type: "tool_result",
-            tool_use_id: toolUseId,
-            content: JSON.stringify(part.functionResponse.response ?? {}),
-          })
-        }
-      }
-    }
-
-    if (!blocks.length) {
-      continue
-    }
-
-    claudeMessages.push({
-      role: message.role === "model" ? "assistant" : "user",
-      content: blocks,
-    })
-  }
-
-  return claudeMessages
-}
-
-function toClaudeTools(tools?: readonly ToolBundle[]) {
-  if (!tools?.length) {
-    return undefined
-  }
-  const declarations = tools.flatMap((bundle) => bundle.functionDeclarations || [])
-  if (!declarations.length) {
-    return undefined
-  }
-  return declarations.map((declaration) => ({
-    name: declaration.name,
-    description: declaration.description || "",
-    input_schema: declaration.parameters || { type: "object", properties: {} },
-  }))
-}
-
 function normalizeOpenAiResult(raw: Record<string, unknown>): UnifiedGenerateResult {
-  const firstChoice = Array.isArray(raw.choices) ? (raw.choices[0] as Record<string, unknown>) : undefined
+  const choices = raw.choices as unknown
+  const firstChoice = Array.isArray(choices) ? (choices[0] as Record<string, unknown>) : undefined
   const message = (firstChoice?.message as Record<string, unknown>) || {}
   const content = typeof message.content === "string" ? message.content : ""
   const toolCalls = Array.isArray(message.tool_calls) ? (message.tool_calls as Array<Record<string, unknown>>) : []
@@ -335,12 +246,7 @@ function normalizeOpenAiResult(raw: Record<string, unknown>): UnifiedGenerateRes
       continue
     }
     const args = typeof fn?.arguments === "string" ? parseJsonObject(fn.arguments) : {}
-    parts.push({
-      functionCall: {
-        name,
-        args,
-      },
-    })
+    parts.push({ functionCall: { name, args } })
   }
 
   return {
@@ -349,75 +255,77 @@ function normalizeOpenAiResult(raw: Record<string, unknown>): UnifiedGenerateRes
   }
 }
 
-function normalizeClaudeResult(raw: Record<string, unknown>): UnifiedGenerateResult {
-  const contentBlocks = Array.isArray(raw.content) ? (raw.content as Array<Record<string, unknown>>) : []
-  const parts: GeneratedPart[] = []
-
-  for (const block of contentBlocks) {
-    if (block.type === "text" && typeof block.text === "string" && block.text.trim()) {
-      parts.push({ text: block.text })
-      continue
-    }
-
-    if (block.type === "tool_use" && typeof block.name === "string") {
-      parts.push({
-        functionCall: {
-          name: block.name,
-          args: typeof block.input === "object" && block.input !== null ? (block.input as Record<string, unknown>) : {},
-        },
-      })
-    }
-  }
-
-  const text = parts
-    .map((part) => part.text || "")
-    .join("")
-    .trim()
-
-  return {
-    text: text || undefined,
-    candidates: [{ content: { parts } }],
-  }
+function getOpenAiCompletionText(raw: Record<string, unknown>) {
+  return normalizeOpenAiResult(raw).text || ""
 }
 
-function getOpenRouterHeaders() {
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    Authorization: `Bearer ${getOpenRouterApiKey()}`,
-  }
-  if (process.env.OPENROUTER_SITE_URL) {
-    headers["HTTP-Referer"] = process.env.OPENROUTER_SITE_URL
-  }
-  if (process.env.OPENROUTER_APP_NAME) {
-    headers["X-Title"] = process.env.OPENROUTER_APP_NAME
-  }
-  return headers
-}
-
-async function callOpenRouterChatCompletion(
-  provider: "openai" | "claude",
+async function postOpenAiCompatible(
+  url: string,
+  apiKey: string,
   body: Record<string, unknown>,
-): Promise<Record<string, unknown>> {
-  if (!getOpenRouterApiKey()) {
-    throw new Error("OPENROUTER_API_KEY is missing.")
-  }
-
-  const model = provider === "openai" ? OPENROUTER_OPENAI_MODEL : OPENROUTER_CLAUDE_MODEL
-  const response = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
+  extraHeaders: Record<string, string> = {},
+) {
+  const response = await fetch(url, {
     method: "POST",
-    headers: getOpenRouterHeaders(),
-    body: JSON.stringify({
-      ...body,
-      model,
-    }),
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+      ...extraHeaders,
+    },
+    body: JSON.stringify(body),
   })
 
   if (!response.ok) {
-    const payload = await response.text()
-    throw new Error(`OpenRouter ${provider} completion failed: ${response.status} ${payload}`)
+    throw new Error(`${response.status} ${await response.text()}`)
   }
 
   return (await response.json()) as Record<string, unknown>
+}
+
+async function callOpenRouter(params: {
+  messages: OpenAiMessage[]
+  tools?: OpenAiTool[]
+  temperature?: number
+  jsonMode?: boolean
+}) {
+  if (!process.env.OPENROUTER_API_KEY) {
+    throw new Error("OPENROUTER_API_KEY is missing.")
+  }
+
+  return postOpenAiCompatible(
+    OPENROUTER_URL,
+    process.env.OPENROUTER_API_KEY,
+    {
+      model: OPENROUTER_MODEL,
+      temperature: params.temperature,
+      messages: params.messages,
+      tools: params.tools,
+      tool_choice: params.tools?.length ? "auto" : undefined,
+      response_format: params.jsonMode ? { type: "json_object" } : undefined,
+    },
+    {
+      ...(process.env.OPENROUTER_SITE_URL ? { "HTTP-Referer": process.env.OPENROUTER_SITE_URL } : {}),
+      ...(process.env.OPENROUTER_APP_NAME ? { "X-Title": process.env.OPENROUTER_APP_NAME } : {}),
+    },
+  )
+}
+
+async function callOpenRouterWithTools(params: GenerateWithToolsParams): Promise<UnifiedGenerateResult> {
+  const parsed = await callOpenRouter({
+    temperature: params.temperature ?? 0.1,
+    messages: toOpenAiMessages(params.systemInstruction, params.messages),
+    tools: toOpenAiTools(params.tools),
+  })
+  return normalizeOpenAiResult(parsed)
+}
+
+async function callOpenRouterText(params: GenerateTextParams): Promise<string> {
+  const parsed = await callOpenRouter({
+    temperature: params.temperature ?? 0.2,
+    messages: toOpenAiMessages(params.systemInstruction, [{ role: "user", content: params.message }]),
+    jsonMode: params.jsonMode,
+  })
+  return getOpenAiCompletionText(parsed)
 }
 
 async function callGeminiWithTools(params: GenerateWithToolsParams): Promise<UnifiedGenerateResult> {
@@ -456,204 +364,165 @@ async function callGeminiText(params: GenerateTextParams): Promise<string> {
 }
 
 async function callOpenAiWithTools(params: GenerateWithToolsParams): Promise<UnifiedGenerateResult> {
-  if (shouldUseOpenRouterForProvider("openai")) {
-    const parsed = await callOpenRouterChatCompletion("openai", {
-      temperature: params.temperature ?? 0.1,
-      messages: toOpenAiMessages(params.systemInstruction, params.messages),
-      tools: toOpenAiTools(params.tools),
-      tool_choice: "auto",
-    })
-    return normalizeOpenAiResult(parsed)
-  }
-
   if (!process.env.OPENAI_API_KEY) {
     throw new Error("OPENAI_API_KEY is missing.")
   }
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: OPENAI_MODEL,
-      temperature: params.temperature ?? 0.1,
-      messages: toOpenAiMessages(params.systemInstruction, params.messages),
-      tools: toOpenAiTools(params.tools),
-      tool_choice: "auto",
-    }),
+  const parsed = await postOpenAiCompatible("https://api.openai.com/v1/chat/completions", process.env.OPENAI_API_KEY, {
+    model: OPENAI_MODEL,
+    temperature: params.temperature ?? 0.1,
+    messages: toOpenAiMessages(params.systemInstruction, params.messages),
+    tools: toOpenAiTools(params.tools),
+    tool_choice: "auto",
   })
-
-  if (!response.ok) {
-    const payload = await response.text()
-    throw new Error(`OpenAI completion failed: ${response.status} ${payload}`)
-  }
-
-  const parsed = (await response.json()) as Record<string, unknown>
   return normalizeOpenAiResult(parsed)
 }
 
 async function callOpenAiText(params: GenerateTextParams): Promise<string> {
-  if (shouldUseOpenRouterForProvider("openai")) {
-    const body: Record<string, unknown> = {
-      temperature: params.temperature ?? 0.2,
-      messages: [
-        ...(params.systemInstruction ? [{ role: "system", content: params.systemInstruction }] : []),
-        { role: "user", content: params.message },
-      ],
-    }
-
-    if (params.jsonMode) {
-      body.response_format = { type: "json_object" }
-    }
-
-    const parsed = await callOpenRouterChatCompletion("openai", body)
-    const firstChoice = Array.isArray(parsed.choices) ? (parsed.choices[0] as Record<string, unknown>) : undefined
-    const message = (firstChoice?.message as Record<string, unknown>) || {}
-    return typeof message.content === "string" ? message.content : ""
-  }
-
   if (!process.env.OPENAI_API_KEY) {
     throw new Error("OPENAI_API_KEY is missing.")
   }
-  const body: Record<string, unknown> = {
+  const parsed = await postOpenAiCompatible("https://api.openai.com/v1/chat/completions", process.env.OPENAI_API_KEY, {
     model: OPENAI_MODEL,
     temperature: params.temperature ?? 0.2,
-    messages: [
-      ...(params.systemInstruction ? [{ role: "system", content: params.systemInstruction }] : []),
-      { role: "user", content: params.message },
-    ],
+    messages: toOpenAiMessages(params.systemInstruction, [{ role: "user", content: params.message }]),
+    response_format: params.jsonMode ? { type: "json_object" } : undefined,
+  })
+  return getOpenAiCompletionText(parsed)
+}
+
+function toClaudeMessages(messages: GeminiMessage[]): ClaudeMessage[] {
+  const pendingToolCallIds: string[] = []
+  let toolCounter = 0
+  const claudeMessages: ClaudeMessage[] = []
+
+  for (const message of messages) {
+    const blocks: ClaudeContentBlock[] = []
+
+    if (typeof message.content === "string") {
+      blocks.push({ type: "text", text: message.content })
+    } else {
+      for (const part of message.content.parts) {
+        if (part.text) {
+          blocks.push({ type: "text", text: part.text })
+        }
+        if (message.role === "model" && part.functionCall) {
+          toolCounter += 1
+          const id = `tool_${toolCounter}`
+          pendingToolCallIds.push(id)
+          blocks.push({
+            type: "tool_use",
+            id,
+            name: part.functionCall.name,
+            input: part.functionCall.args || {},
+          })
+        }
+        if (message.role === "user" && part.functionResponse) {
+          blocks.push({
+            type: "tool_result",
+            tool_use_id: pendingToolCallIds.shift() || `tool_${toolCounter + 1}`,
+            content: JSON.stringify(part.functionResponse.response ?? {}),
+          })
+        }
+      }
+    }
+
+    if (blocks.length) {
+      claudeMessages.push({
+        role: message.role === "model" ? "assistant" : "user",
+        content: blocks,
+      })
+    }
   }
 
-  if (params.jsonMode) {
-    body.response_format = { type: "json_object" }
+  return claudeMessages
+}
+
+function toClaudeTools(tools?: readonly ToolBundle[]) {
+  const declarations = tools?.flatMap((bundle) => bundle.functionDeclarations || []) ?? []
+  return declarations.length
+    ? declarations.map((declaration) => ({
+        name: declaration.name,
+        description: declaration.description || "",
+        input_schema: declaration.parameters || { type: "object", properties: {} },
+      }))
+    : undefined
+}
+
+function normalizeClaudeResult(raw: Record<string, unknown>): UnifiedGenerateResult {
+  const contentBlocks = Array.isArray(raw.content) ? (raw.content as Array<Record<string, unknown>>) : []
+  const parts: GeneratedPart[] = []
+
+  for (const block of contentBlocks) {
+    if (block.type === "text" && typeof block.text === "string" && block.text.trim()) {
+      parts.push({ text: block.text })
+    } else if (block.type === "tool_use" && typeof block.name === "string") {
+      parts.push({
+        functionCall: {
+          name: block.name,
+          args: typeof block.input === "object" && block.input !== null ? (block.input as Record<string, unknown>) : {},
+        },
+      })
+    }
   }
 
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+  return {
+    text: parts.map((part) => part.text || "").join("").trim() || undefined,
+    candidates: [{ content: { parts } }],
+  }
+}
+
+async function postClaude(body: Record<string, unknown>) {
+  const apiKey = getClaudeApiKey()
+  if (!apiKey) {
+    throw new Error("CLAUDE_API_KEY or ANTHROPIC_API_KEY is missing.")
+  }
+
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
     },
     body: JSON.stringify(body),
   })
 
   if (!response.ok) {
-    const payload = await response.text()
-    throw new Error(`OpenAI completion failed: ${response.status} ${payload}`)
+    throw new Error(`Claude completion failed: ${response.status} ${await response.text()}`)
   }
 
-  const parsed = (await response.json()) as Record<string, unknown>
-  const firstChoice = Array.isArray(parsed.choices) ? (parsed.choices[0] as Record<string, unknown>) : undefined
-  const message = (firstChoice?.message as Record<string, unknown>) || {}
-  const content = typeof message.content === "string" ? message.content : ""
-  return content
+  return (await response.json()) as Record<string, unknown>
 }
 
 async function callClaudeWithTools(params: GenerateWithToolsParams): Promise<UnifiedGenerateResult> {
-  if (shouldUseOpenRouterForProvider("claude")) {
-    const parsed = await callOpenRouterChatCompletion("claude", {
-      temperature: params.temperature ?? 0.1,
-      messages: toOpenAiMessages(params.systemInstruction, params.messages),
-      tools: toOpenAiTools(params.tools),
-      tool_choice: "auto",
-    })
-    return normalizeOpenAiResult(parsed)
-  }
-
-  const apiKey = getClaudeApiKey()
-  if (!apiKey) {
-    throw new Error("CLAUDE_API_KEY or ANTHROPIC_API_KEY is missing.")
-  }
-
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: CLAUDE_MODEL,
-      system: params.systemInstruction,
-      max_tokens: 2048,
-      temperature: params.temperature ?? 0.1,
-      tools: toClaudeTools(params.tools),
-      messages: toClaudeMessages(params.messages),
-    }),
+  const parsed = await postClaude({
+    model: CLAUDE_MODEL,
+    system: params.systemInstruction,
+    max_tokens: 2048,
+    temperature: params.temperature ?? 0.1,
+    tools: toClaudeTools(params.tools),
+    messages: toClaudeMessages(params.messages),
   })
-
-  if (!response.ok) {
-    const payload = await response.text()
-    throw new Error(`Claude completion failed: ${response.status} ${payload}`)
-  }
-
-  const parsed = (await response.json()) as Record<string, unknown>
   return normalizeClaudeResult(parsed)
 }
 
 async function callClaudeText(params: GenerateTextParams): Promise<string> {
-  if (shouldUseOpenRouterForProvider("claude")) {
-    const body: Record<string, unknown> = {
-      temperature: params.temperature ?? 0.2,
-      messages: [
-        ...(params.systemInstruction ? [{ role: "system", content: params.systemInstruction }] : []),
-        { role: "user", content: params.message },
-      ],
-    }
-
-    if (params.jsonMode) {
-      body.response_format = { type: "json_object" }
-    }
-
-    const parsed = await callOpenRouterChatCompletion("claude", body)
-    const firstChoice = Array.isArray(parsed.choices) ? (parsed.choices[0] as Record<string, unknown>) : undefined
-    const message = (firstChoice?.message as Record<string, unknown>) || {}
-    return typeof message.content === "string" ? message.content : ""
-  }
-
-  const apiKey = getClaudeApiKey()
-  if (!apiKey) {
-    throw new Error("CLAUDE_API_KEY or ANTHROPIC_API_KEY is missing.")
-  }
-
   const userMessage = params.jsonMode
     ? `${params.message}\n\nRespond with a single valid JSON object and no surrounding commentary.`
     : params.message
-
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: CLAUDE_MODEL,
-      system: params.systemInstruction,
-      max_tokens: 2048,
-      temperature: params.temperature ?? 0.2,
-      messages: [{ role: "user", content: [{ type: "text", text: userMessage }] }],
-    }),
+  const parsed = await postClaude({
+    model: CLAUDE_MODEL,
+    system: params.systemInstruction,
+    max_tokens: 2048,
+    temperature: params.temperature ?? 0.2,
+    messages: [{ role: "user", content: [{ type: "text", text: userMessage }] }],
   })
-
-  if (!response.ok) {
-    const payload = await response.text()
-    throw new Error(`Claude completion failed: ${response.status} ${payload}`)
-  }
-
-  const parsed = (await response.json()) as Record<string, unknown>
   return normalizeClaudeResult(parsed).text || ""
 }
 
 async function runWithFallback<T>(execute: (provider: ProviderName) => Promise<T>) {
-  const enabledProviders = getEnabledProviders()
-  if (!enabledProviders.length) {
-    throw new Error("No LLM providers configured. Set GEMINI_API_KEY, OPENAI_API_KEY, or CLAUDE_API_KEY.")
-  }
-
   const failures: string[] = []
-  for (const provider of enabledProviders) {
+  for (const provider of getEnabledProviders()) {
     try {
       return await execute(provider)
     } catch (error) {
@@ -664,7 +533,10 @@ async function runWithFallback<T>(execute: (provider: ProviderName) => Promise<T
   throw new Error(`All configured LLM providers failed. ${failures.join(" | ")}`)
 }
 
-async function callProviderText(provider: ProviderName, params: GenerateTextParams) {
+function callProviderText(provider: ProviderName, params: GenerateTextParams) {
+  if (provider === "openrouter") {
+    return callOpenRouterText(params)
+  }
   if (provider === "gemini") {
     return callGeminiText(params)
   }
@@ -674,65 +546,11 @@ async function callProviderText(provider: ProviderName, params: GenerateTextPara
   return callClaudeText(params)
 }
 
-function buildSynthesisPrompt(params: GenerateTextParams, drafts: ProviderDraft[]) {
-  const systemSection = params.systemInstruction?.trim()
-    ? `System instruction:\n${params.systemInstruction.trim()}\n\n`
-    : ""
-
-  const draftSection = drafts
-    .map((draft, index) => `Draft ${index + 1} (${draft.provider}):\n${draft.text}`)
-    .join("\n\n")
-
-  return [
-    "You are an orchestration layer combining multiple LLM drafts into one final answer.",
-    "Maximize prompt alignment over style.",
-    "Priorities in order:",
-    "1. Follow the user's request and system instruction exactly.",
-    "2. Preserve concrete constraints, caveats, and requested format.",
-    "3. Prefer content repeated across drafts when they agree.",
-    "4. Remove speculation, filler, and unsupported claims.",
-    "5. If drafts conflict, choose the version that is most directly supported by the prompt and internally consistent.",
-    params.jsonMode ? "Return one valid JSON object only." : "Return only the final answer.",
-    "",
-    systemSection + `User prompt:\n${params.message}\n\nCandidate drafts:\n${draftSection}`,
-  ].join("\n")
-}
-
-async function generateAlignedText(params: GenerateTextParams, enabledProviders: ProviderName[]) {
-  const draftResults = await Promise.allSettled(
-    enabledProviders.map(async (provider) => ({
-      provider,
-      text: await callProviderText(provider, params),
-    })),
-  )
-
-  const drafts = draftResults
-    .filter((result): result is PromiseFulfilledResult<ProviderDraft> => result.status === "fulfilled")
-    .map((result) => result.value)
-    .filter((draft) => draft.text.trim().length > 0)
-
-  if (!drafts.length) {
-    const failures = draftResults
-      .filter((result): result is PromiseRejectedResult => result.status === "rejected")
-      .map((result) => String(result.reason))
-    throw new Error(`All ensemble providers failed. ${failures.join(" | ")}`)
-  }
-
-  if (drafts.length === 1) {
-    return drafts[0].text
-  }
-
-  const synthProvider = synthesisProvider(drafts.map((draft) => draft.provider))
-  return callProviderText(synthProvider, {
-    systemInstruction: params.systemInstruction,
-    message: buildSynthesisPrompt(params, drafts),
-    temperature: 0,
-    jsonMode: params.jsonMode,
-  })
-}
-
 export async function generateWithTools(params: GenerateWithToolsParams): Promise<UnifiedGenerateResult> {
   return runWithFallback((provider) => {
+    if (provider === "openrouter") {
+      return callOpenRouterWithTools(params)
+    }
     if (provider === "gemini") {
       return callGeminiWithTools(params)
     }
@@ -744,14 +562,5 @@ export async function generateWithTools(params: GenerateWithToolsParams): Promis
 }
 
 export async function generateText(params: GenerateTextParams): Promise<string> {
-  const enabledProviders = getEnabledProviders()
-  if (!enabledProviders.length) {
-    throw new Error("No LLM providers configured. Set GEMINI_API_KEY, OPENAI_API_KEY, or CLAUDE_API_KEY.")
-  }
-
-  if (shouldUseEnsemble(params, enabledProviders)) {
-    return generateAlignedText(params, enabledProviders)
-  }
-
   return runWithFallback((provider) => callProviderText(provider, params))
 }

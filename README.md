@@ -10,15 +10,14 @@ It contains two distinct agents with separate auth boundaries, personas, and too
 ## What this repo includes
 
 - Next.js App Router backend + UI shell
-- Multi-provider LLM orchestration across Gemini, OpenAI, and Claude
-- Prompt-alignment ensemble mode for higher instruction fidelity on text generations
+- OpenRouter free-model response generation by default, with Gemini/OpenAI/Claude fallback
 - Gemini 2.0 Flash integration for chat + tool use + multimodal document analysis
 - MongoDB lending knowledge base (`lending_products`) and partner brief storage
 - Redis caching + conversation memory
 - GPS backend bridge layer with partner-scope enforcement
 - WhatsApp integration wrapper (Meta direct API, feature-flagged)
 - Soft-check engine (five-layer eligibility logic)
-- Morning briefing generator + cron worker
+- Morning briefing generator + cron webhook
 - Unit tests with Vitest
 
 ## Architecture
@@ -71,6 +70,9 @@ GPS_INDIA_WEBHOOK_URL=http://localhost:4000/internal/ops/chat-escalation
 GEMINI_API_KEY=your_gemini_api_key
 OPENAI_API_KEY=your_openai_api_key
 CLAUDE_API_KEY=your_claude_api_key
+OPENROUTER_API_KEY=your_openrouter_api_key
+OPENROUTER_DEFAULT_MODEL=meta-llama/llama-3.3-70b-instruct:free
+LLM_PROVIDER_ORDER=gemini,openrouter
 REDIS_URL=redis://127.0.0.1:6379
 CHAT_ALLOWED_ORIGINS=http://localhost:3000
 CHAT_RATE_LIMIT_MAX=30
@@ -80,7 +82,7 @@ CHAT_RATE_LIMIT_WINDOW_MS=60000
 Notes:
 - `.env` is ignored and should remain local-only.
 - `.env.example` is placeholder-only and safe to commit.
-- `LLM_ORCHESTRATION_MODE` is optional. Leave it unset for single-provider fallback, or set it to `ensemble` only when you explicitly want the higher-cost synthesis path.
+- Gemini is first by default, with OpenRouter as the fallback. Set `LLM_PROVIDER_ORDER` only when you need a different fallback order.
 - The previously exposed provider/database keys must still be rotated manually outside the repo.
 
 ## Install and run
@@ -117,10 +119,8 @@ Review seed data before importing:
 
 ## Briefing job
 
-Standalone scheduler:
-- `src/jobs/morningBriefing.ts`
-- Runs daily at 7:00 AM IST (`Asia/Kolkata`)
-- Executes only if `ENABLE_MORNING_BRIEF=true`
+Call `POST /api/webhooks/briefing-cron` from your platform scheduler.
+It executes only if `ENABLE_MORNING_BRIEF=true`.
 
 ## Security model
 
@@ -141,8 +141,9 @@ Standalone scheduler:
 - Node.js
 - MongoDB + Mongoose
 - Redis + ioredis
-- Gemini (`@google/genai`, `gemini-2.0-flash`)
-- OpenAI Chat Completions
+- Gemini (`@google/genai`, `gemini-2.5-flash`)
+- OpenRouter Chat Completions
+- OpenAI Chat Completions fallback
 - Anthropic Claude Messages API
 - Vitest (unit tests)
 

@@ -1,7 +1,6 @@
 'use client'
 
 import { useMemo, useState } from "react"
-import { motion } from "motion/react"
 import Link from "next/link"
 
 type BotRecord = {
@@ -10,7 +9,7 @@ type BotRecord = {
   slug: string
 }
 
-export default function OnboardingClient({ ownerId }: { ownerId: string }) {
+export default function OnboardingClient() {
   const [bots, setBots] = useState<BotRecord[]>([])
   const [name, setName] = useState("")
   const [systemPrompt, setSystemPrompt] = useState("You are a helpful customer support assistant.")
@@ -138,9 +137,7 @@ export default function OnboardingClient({ ownerId }: { ownerId: string }) {
   return (
     <main className="min-h-screen px-4 py-14">
       <div className="mx-auto max-w-5xl space-y-8">
-        <motion.section
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
+        <section
           className="rounded-2xl border bg-white p-8 shadow-xl"
           style={{ borderColor: "var(--border)" }}
         >
@@ -149,7 +146,7 @@ export default function OnboardingClient({ ownerId }: { ownerId: string }) {
           <p className="mt-2 text-sm text-zinc-600">
             Create a bot, add knowledge, then copy the embed code.
           </p>
-        </motion.section>
+        </section>
 
         <div className="grid gap-6">
           <section className="rounded-2xl border bg-white p-6 shadow-lg" style={{ borderColor: "var(--border)" }}>

@@ -18,5 +18,5 @@ export default async function OnboardingPage() {
     redirect("/dashboard/bots")
   }
 
-  return <OnboardingClient ownerId={ownerId} />
+  return <OnboardingClient />
 }

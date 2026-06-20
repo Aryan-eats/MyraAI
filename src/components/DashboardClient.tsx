@@ -1,9 +1,7 @@
 'use client'
 
 import React, { useEffect, useState } from "react"
-import { motion } from "motion/react"
 import { useRouter } from "next/navigation"
-import axios from "axios"
 
 function DashboardClient({ ownerId }: { ownerId: string }) {
   const navigate = useRouter()
@@ -16,7 +14,11 @@ function DashboardClient({ ownerId }: { ownerId: string }) {
   const handleSettings = async () => {
     setLoading(true)
     try {
-      await axios.post("/api/settings", { ownerId, businessName, supportEmail, knowledge })
+      await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ownerId, businessName, supportEmail, knowledge }),
+      })
       setSaved(true)
       setTimeout(() => setSaved(false), 3000)
     } catch (error) {
@@ -33,10 +35,11 @@ function DashboardClient({ ownerId }: { ownerId: string }) {
 
     const handleGetDetails = async () => {
       try {
-        const result = await axios.post("/api/settings/get", { ownerId })
-        setBusinessName(result.data?.businessName || "")
-        setSupportEmail(result.data?.supportEmail || "")
-        setKnowledge(result.data?.knowledge || "")
+        const response = await fetch(`/api/settings?ownerId=${encodeURIComponent(ownerId)}`, { cache: "no-store" })
+        const result = await response.json()
+        setBusinessName(result?.businessName || "")
+        setSupportEmail(result?.supportEmail || "")
+        setKnowledge(result?.knowledge || "")
       } catch (error) {
         console.log(error)
       }
@@ -46,18 +49,17 @@ function DashboardClient({ ownerId }: { ownerId: string }) {
   }, [ownerId])
 
   const quickActions = [
-    { title: "Manage Bots", desc: "Create bots, edit settings, and manage embedded assistants.", href: "/dashboard/bots" },
-    { title: "Open CRM Copilot", desc: "Ask about blocked files, reminders, or commissions.", href: `/chat?mode=crm&ownerId=${ownerId}` },
+    { title: "Manage Bots", desc: "Create bots, edit settings, and copy embed code.", href: "/dashboard/bots" },
     { title: "Test Web Advisor", desc: "Validate borrower-facing guidance and product coverage.", href: "/chat?mode=web" },
-    { title: "Embed Assistant", desc: "Deploy the website chat widget with your owner key.", href: "/embed" },
+    { title: "CRM Copilot", desc: "Ask about blocked files, reminders, or commissions.", href: `/chat?mode=crm&ownerId=${ownerId}` },
+    { title: "Partner Chatbot", desc: "Test the authenticated partner pipeline chatbot.", href: "/chat?mode=partner" },
+    { title: "Admin Chatbot", desc: "Test the admin platform analytics chatbot.", href: "/chat?mode=admin" },
+    { title: "Embed Assistant", desc: "Deploy the chat widget — pick a bot from Manage Bots first.", href: "/dashboard/bots" },
   ]
 
   return (
     <div className="min-h-screen">
-      <motion.div
-        initial={{ y: -50 }}
-        animate={{ y: 0 }}
-        transition={{ duration: 0.5 }}
+      <div
         className="fixed top-0 left-0 w-full z-50 border-b backdrop-blur-xl"
         style={{
           backgroundColor: "color-mix(in srgb, var(--surface) 82%, transparent)",
@@ -68,19 +70,19 @@ function DashboardClient({ ownerId }: { ownerId: string }) {
           <button className="text-lg font-semibold tracking-tight cursor-pointer" onClick={() => navigate.push("/")}>
             Myra <span className="text-zinc-400">AI</span>
           </button>
-          <button className="px-4 py-2 rounded-lg border text-sm hover:bg-zinc-100 transition" style={{ borderColor: "var(--border)" }} onClick={() => navigate.push("/embed")}>
+          <button className="px-4 py-2 rounded-lg border text-sm hover:bg-zinc-100 transition" style={{ borderColor: "var(--border)" }} onClick={() => navigate.push("/dashboard/bots")}>
             Embed Assistant
           </button>
         </div>
-      </motion.div>
+      </div>
 
       <div className="max-w-6xl mx-auto px-4 py-14 mt-20 space-y-8">
-        <motion.div className="rounded-2xl border shadow-xl p-8" style={{ backgroundColor: "var(--surface)", borderColor: "var(--border)" }}>
+        <div className="rounded-2xl border shadow-xl p-8" style={{ backgroundColor: "var(--surface)", borderColor: "var(--border)" }}>
           <h1 className="text-2xl font-semibold">Partner Control Center</h1>
           <p className="mt-2 text-sm" style={{ color: "var(--text-muted)" }}>
             Configure borrower-facing responses and launch CRM operations workflows from one workspace.
           </p>
-          <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4 lg:grid-cols-3">
             {quickActions.map((item) => (
               <button
                 key={item.title}
@@ -95,9 +97,9 @@ function DashboardClient({ ownerId }: { ownerId: string }) {
               </button>
             ))}
           </div>
-        </motion.div>
+        </div>
 
-        <motion.div className="rounded-2xl border shadow-xl p-8" style={{ backgroundColor: "var(--surface)", borderColor: "var(--border)" }}>
+        <div className="rounded-2xl border shadow-xl p-8" style={{ backgroundColor: "var(--surface)", borderColor: "var(--border)" }}>
           <div className="mb-8">
             <h2 className="text-xl font-semibold">Assistant Settings</h2>
             <p className="text-sm mt-1" style={{ color: "var(--text-muted)" }}>
@@ -148,22 +150,20 @@ function DashboardClient({ ownerId }: { ownerId: string }) {
           </div>
 
           <div className="flex items-center gap-5 mt-8">
-            <motion.button
-              whileHover={{ scale: 1.03 }}
-              whileTap={{ scale: 0.97 }}
+            <button
               disabled={loading}
               onClick={handleSettings}
               className="px-7 py-3 rounded-xl bg-black text-white text-sm font-medium hover:bg-zinc-800 transition disabled:opacity-60"
             >
               {loading ? "Saving..." : "Save Settings"}
-            </motion.button>
+            </button>
             {saved ? (
-              <motion.span initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="text-sm font-medium text-emerald-600">
+              <span className="text-sm font-medium text-emerald-600">
                 Settings saved
-              </motion.span>
+              </span>
             ) : null}
           </div>
-        </motion.div>
+        </div>
       </div>
     </div>
   )

@@ -3,6 +3,7 @@
 import type { CSSProperties } from "react"
 import { useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
+import { FormattedChatMessage } from "@/components/FormattedChatMessage"
 
 type BotPublicConfig = {
   name: string
@@ -77,6 +78,7 @@ export default function EmbedChat() {
         }
 
         setBot(data)
+        window.parent.postMessage({ type: "myra:color", color: data.primaryColor }, "*")
         setMessages((current) =>
           current.length > 0
             ? current
@@ -203,7 +205,7 @@ export default function EmbedChat() {
               }`}
               style={message.role === "user" ? { backgroundColor: accentColor } : undefined}
             >
-              {message.content}
+              <FormattedChatMessage text={message.content} />
             </div>
           ))}
           {loading ? (

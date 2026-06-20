@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react"
 import Link from "next/link"
-import { motion } from "motion/react"
 
 type BotRecord = {
   _id: string
@@ -89,9 +88,7 @@ export default function BotsManager() {
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-14">
-      <motion.div
-        initial={{ opacity: 0, y: 16 }}
-        animate={{ opacity: 1, y: 0 }}
+      <div
         className="rounded-2xl border shadow-xl p-8"
         style={{ backgroundColor: "var(--surface)", borderColor: "var(--border)" }}
       >
@@ -130,7 +127,7 @@ export default function BotsManager() {
             </div>
           </div>
         ) : null}
-      </motion.div>
+      </div>
 
       <div className="mt-8">
         {loading ? (
@@ -138,10 +135,8 @@ export default function BotsManager() {
         ) : (
           <div className="grid gap-4">
             {bots.map((bot) => (
-              <motion.div
+              <div
                 key={bot._id}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
                 className="rounded-2xl border p-5"
                 style={{ backgroundColor: "var(--surface)", borderColor: "var(--border)" }}
               >
@@ -165,7 +160,7 @@ export default function BotsManager() {
                     </Link>
                   </div>
                 </div>
-              </motion.div>
+              </div>
             ))}
             {bots.length === 0 ? <div className="text-sm text-zinc-500">No bots yet.</div> : null}
           </div>

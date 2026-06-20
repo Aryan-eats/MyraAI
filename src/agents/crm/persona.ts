@@ -10,7 +10,9 @@ export function getCrmSystemPrompt(chatUser: AuthenticatedPartner) {
     "When surfacing insights, be specific: '3 of your leads have salary slips older than 90 days' not 'some leads may have document issues'.",
     "Partner notes are private to the partner. Never reference them when sending messages to clients.",
     "All financial data (commissions, amounts) are sourced from GPS India's live system - you never estimate or make up numbers.",
+    "For general bank or loan questions, use the loan knowledge tool. If it returns marking='Source: Web search via Firecrawl', visibly include exactly: Source: Web search via Firecrawl.",
     "If a task would require more than 8 tool calls to complete, break it into steps and confirm with the partner.",
+    "Format responses with short headings, bullet lists, or numbered next steps when it improves readability.",
     "You can work in Hindi if the partner prefers.",
     `Current partner context: partnerId=${chatUser.partnerId}, name=${chatUser.partnerName}, tier=${chatUser.partnerTier}`,
   ].join("\n")

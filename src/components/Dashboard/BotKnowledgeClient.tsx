@@ -1,7 +1,6 @@
 'use client'
 
 import { useEffect, useMemo, useState } from "react"
-import { motion } from "motion/react"
 
 type KnowledgeSource = {
   _id: string
@@ -9,6 +8,7 @@ type KnowledgeSource = {
   type: "text" | "file" | "url"
   status: "pending" | "processing" | "ready" | "failed"
   chunkCount: number
+  errorMessage?: string
   createdAt: string
 }
 
@@ -132,6 +132,27 @@ export default function BotKnowledgeClient({ botId, botName }: { botId: string; 
     }
   }
 
+  const retrySource = async (sourceId: string) => {
+    setSaving(true)
+    try {
+      const response = await fetch(`/api/knowledge/${botId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sourceId }),
+      })
+      const data = (await response.json()) as { error?: string }
+      if (!response.ok) {
+        throw new Error(data.error || "Retry failed")
+      }
+      refreshNotice("Re-ingestion queued.")
+      await loadSources()
+    } catch (retryError) {
+      setError(retryError instanceof Error ? retryError.message : "Retry failed")
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const deleteSource = async (sourceId: string) => {
     setSaving(true)
     try {
@@ -163,9 +184,7 @@ export default function BotKnowledgeClient({ botId, botName }: { botId: string; 
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-14 space-y-8">
-      <motion.div
-        initial={{ opacity: 0, y: 16 }}
-        animate={{ opacity: 1, y: 0 }}
+      <div
         className="rounded-2xl border shadow-xl p-8"
         style={{ backgroundColor: "var(--surface)", borderColor: "var(--border)" }}
       >
@@ -174,27 +193,27 @@ export default function BotKnowledgeClient({ botId, botName }: { botId: string; 
         <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>
           Upload files, add text, or ingest URLs. Processing sources will poll until ready.
         </p>
-      </motion.div>
+      </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <motion.div className="rounded-2xl border p-6" style={{ backgroundColor: "var(--surface)", borderColor: "var(--border)" }}>
+        <div className="rounded-2xl border p-6" style={{ backgroundColor: "var(--surface)", borderColor: "var(--border)" }}>
           <h2 className="text-lg font-semibold">Upload File</h2>
           <input className="mt-4 block w-full text-sm" type="file" accept=".txt,.pdf,.md,.csv,.docx" onChange={(event) => setFile(event.target.files?.[0] ?? null)} />
           <button type="button" disabled={saving} onClick={() => void submitFile()} className="mt-4 rounded-xl bg-black px-4 py-2 text-sm font-medium text-white disabled:opacity-60">
             {saving ? "Uploading..." : "Upload and Process"}
           </button>
-        </motion.div>
+        </div>
 
-        <motion.div className="rounded-2xl border p-6" style={{ backgroundColor: "var(--surface)", borderColor: "var(--border)" }}>
+        <div className="rounded-2xl border p-6" style={{ backgroundColor: "var(--surface)", borderColor: "var(--border)" }}>
           <h2 className="text-lg font-semibold">Add Text</h2>
           <input className="mt-4 w-full rounded-xl border px-4 py-3 text-sm" style={{ borderColor: "var(--border)" }} placeholder="Optional name" value={textName} onChange={(event) => setTextName(event.target.value)} />
           <textarea className="mt-3 min-h-40 w-full rounded-xl border px-4 py-3 text-sm" style={{ borderColor: "var(--border)" }} placeholder="Paste raw text here" value={text} onChange={(event) => setText(event.target.value)} />
           <button type="button" disabled={saving} onClick={() => void submitText("text")} className="mt-4 rounded-xl bg-black px-4 py-2 text-sm font-medium text-white disabled:opacity-60">
             Save Text
           </button>
-        </motion.div>
+        </div>
 
-        <motion.div className="rounded-2xl border p-6 lg:col-span-2" style={{ backgroundColor: "var(--surface)", borderColor: "var(--border)" }}>
+        <div className="rounded-2xl border p-6 lg:col-span-2" style={{ backgroundColor: "var(--surface)", borderColor: "var(--border)" }}>
           <h2 className="text-lg font-semibold">Add URL</h2>
           <div className="mt-4 flex gap-3">
             <input className="w-full rounded-xl border px-4 py-3 text-sm" style={{ borderColor: "var(--border)" }} placeholder="https://example.com/help" value={url} onChange={(event) => setUrl(event.target.value)} />
@@ -202,10 +221,10 @@ export default function BotKnowledgeClient({ botId, botName }: { botId: string; 
               Save URL
             </button>
           </div>
-        </motion.div>
+        </div>
       </div>
 
-      <motion.div className="rounded-2xl border p-6" style={{ backgroundColor: "var(--surface)", borderColor: "var(--border)" }}>
+      <div className="rounded-2xl border p-6" style={{ backgroundColor: "var(--surface)", borderColor: "var(--border)" }}>
         <div className="flex items-center justify-between gap-4">
           <div>
             <h2 className="text-lg font-semibold">Knowledge Sources</h2>
@@ -225,20 +244,32 @@ export default function BotKnowledgeClient({ botId, botName }: { botId: string; 
                 <th className="py-2 pr-4">Status</th>
                 <th className="py-2 pr-4">Chunks</th>
                 <th className="py-2 pr-4">Created</th>
-                <th className="py-2 pr-4">Action</th>
+                <th className="py-2 pr-4">Actions</th>
               </tr>
             </thead>
             <tbody>
               {sources.map((source) => (
                 <tr key={source._id} className="border-t" style={{ borderColor: "var(--border)" }}>
-                  <td className="py-3 pr-4">{source.name}</td>
+                  <td className="py-3 pr-4">
+                    <div>{source.name}</div>
+                    {source.status === "failed" && source.errorMessage ? (
+                      <div className="mt-1 text-xs text-red-500" title={source.errorMessage}>
+                        {source.errorMessage.length > 60 ? `${source.errorMessage.slice(0, 60)}…` : source.errorMessage}
+                      </div>
+                    ) : null}
+                  </td>
                   <td className="py-3 pr-4 capitalize">{source.type}</td>
                   <td className="py-3 pr-4">
                     <span className={statusBadge(source.status)}>{source.status}</span>
                   </td>
                   <td className="py-3 pr-4">{source.chunkCount}</td>
                   <td className="py-3 pr-4">{new Date(source.createdAt).toLocaleString()}</td>
-                  <td className="py-3 pr-4">
+                  <td className="py-3 pr-4 flex gap-2">
+                    {source.status === "failed" ? (
+                      <button type="button" disabled={saving} onClick={() => void retrySource(source._id)} className="rounded-xl border px-3 py-2 text-xs text-amber-700 border-amber-300 hover:bg-amber-50 transition" >
+                        Retry
+                      </button>
+                    ) : null}
                     <button type="button" disabled={saving} onClick={() => void deleteSource(source._id)} className="rounded-xl border px-3 py-2 text-xs" style={{ borderColor: "var(--border)" }}>
                       Delete
                     </button>
@@ -255,7 +286,7 @@ export default function BotKnowledgeClient({ botId, botName }: { botId: string; 
             </tbody>
           </table>
         </div>
-      </motion.div>
+      </div>
 
       {notice ? <div className="text-sm text-emerald-600">{notice}</div> : null}
       {error ? <div className="text-sm text-red-600">{error}</div> : null}

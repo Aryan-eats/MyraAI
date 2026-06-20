@@ -7,6 +7,7 @@ import { queryPipeline } from "@/agents/crm/tools/queryPipeline"
 import { runSoftCheck } from "@/agents/crm/tools/runSoftCheck"
 import { sendWhatsapp } from "@/agents/crm/tools/sendWhatsapp"
 import { generateWithTools } from "@/lib/gemini"
+import { answerLoanQuestion } from "@/lib/loanAnswering"
 import type { AgentResponse, AuthenticatedPartner, GeminiMessage } from "@/types/agents"
 
 export class AgentLoopError extends Error {
@@ -18,6 +19,20 @@ export class AgentLoopError extends Error {
 
 function getCrmToolDeclarations() {
   return [
+    {
+      name: "search_loan_knowledge",
+      description:
+        "Answer general borrower questions about banks and loans. Searches GPS India PostgreSQL data first, then Firecrawl web search only when database data is unavailable. Include returned marking in web-search answers.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string" },
+          loanType: { type: "string" },
+          bankCode: { type: "string" },
+        },
+        required: ["query"],
+      },
+    },
     {
       name: "send_whatsapp",
       description: "Send WhatsApp templates to clients or groups.",
@@ -92,6 +107,13 @@ async function executeTool(functionCall: { name: string; args?: Record<string, u
 
   if (functionCall.name === "send_whatsapp") {
     return sendWhatsapp(args as never, chatUser)
+  }
+  if (functionCall.name === "search_loan_knowledge") {
+    return answerLoanQuestion({
+      query: String(args.query || ""),
+      ...(args.loanType ? { loanType: String(args.loanType) } : {}),
+      ...(args.bankCode ? { bankCode: String(args.bankCode) } : {}),
+    })
   }
   if (functionCall.name === "analyse_document") {
     return analyseDocument(args as never, chatUser)

@@ -2,7 +2,6 @@
 
 import { useMemo, useState } from "react"
 import Link from "next/link"
-import { motion } from "motion/react"
 
 type BotRecord = {
   _id: string
@@ -77,9 +76,7 @@ export default function BotSettingsClient({ bot }: { bot: BotRecord }) {
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-14 space-y-8">
-      <motion.div
-        initial={{ opacity: 0, y: 16 }}
-        animate={{ opacity: 1, y: 0 }}
+      <div
         className="rounded-2xl border shadow-xl p-8"
         style={{ backgroundColor: "var(--surface)", borderColor: "var(--border)" }}
       >
@@ -115,11 +112,9 @@ export default function BotSettingsClient({ bot }: { bot: BotRecord }) {
             {error ? <span className="text-sm text-red-600">{error}</span> : null}
           </div>
         </div>
-      </motion.div>
+      </div>
 
-      <motion.div
-        initial={{ opacity: 0, y: 16 }}
-        animate={{ opacity: 1, y: 0 }}
+      <div
         className="rounded-2xl border shadow-xl p-8"
         style={{ backgroundColor: "var(--surface)", borderColor: "var(--border)" }}
       >
@@ -137,7 +132,7 @@ export default function BotSettingsClient({ bot }: { bot: BotRecord }) {
         <pre className="mt-4 overflow-x-auto rounded-2xl bg-zinc-950 p-4 text-sm text-zinc-100">
           {embedCode}
         </pre>
-      </motion.div>
+      </div>
     </div>
   )
 }

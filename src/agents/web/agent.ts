@@ -1,7 +1,9 @@
 import { getWebSystemPrompt } from "@/agents/web/persona"
+import { calculateEmi } from "@/agents/web/tools/calculateEmi"
 import { captureLead } from "@/agents/web/tools/captureLead"
 import { checkEligibility } from "@/agents/web/tools/checkEligibility"
 import { compareProducts } from "@/agents/web/tools/compareProducts"
+import { getDocuments } from "@/agents/web/tools/getDocuments"
 import { searchKnowledge } from "@/agents/web/tools/searchKnowledge"
 import { generateWithTools } from "@/lib/gemini"
 import type { AgentResponse, GeminiMessage } from "@/types/agents"
@@ -10,13 +12,55 @@ function getWebToolDeclarations() {
   return [
     {
       name: "search_knowledge",
-      description: "Search lending products, rates, fees and documentation requirements.",
+      description:
+        "Look up loan products, interest rates, processing fees and turnaround time from GPS India's live lender database first. If the database has no useful match, this tool falls back to Firecrawl web search and returns marking='Source: Web search via Firecrawl'; include that marking in the answer.",
       parameters: {
         type: "object",
         properties: {
+          loanType: { type: "string" },
+          bankCode: { type: "string" },
           query: { type: "string" },
         },
         required: ["query"],
+      },
+    },
+    {
+      name: "compare_products",
+      description: "Compare all banks offering a loan type, cheapest interest rate first. Pass loanType.",
+      parameters: {
+        type: "object",
+        properties: {
+          loanType: { type: "string" },
+          amount: { type: "number" },
+        },
+        required: ["loanType"],
+      },
+    },
+    {
+      name: "get_documents",
+      description:
+        "Get the official document checklist for a specific bank and loan type. Pass bankCode (e.g. HDFC) and loanType (e.g. home_loan).",
+      parameters: {
+        type: "object",
+        properties: {
+          bankCode: { type: "string" },
+          loanType: { type: "string" },
+        },
+        required: ["bankCode", "loanType"],
+      },
+    },
+    {
+      name: "calculate_emi",
+      description:
+        "Calculate the exact monthly EMI, total payable and total interest for a loan. Pass principalAmount (rupees), annualInterestRate (percent) and tenureMonths.",
+      parameters: {
+        type: "object",
+        properties: {
+          principalAmount: { type: "number" },
+          annualInterestRate: { type: "number" },
+          tenureMonths: { type: "number" },
+        },
+        required: ["principalAmount", "annualInterestRate", "tenureMonths"],
       },
     },
     {
@@ -30,18 +74,6 @@ function getWebToolDeclarations() {
           proposedEmi: { type: "number" },
         },
         required: ["monthlyIncome", "monthlyObligations", "proposedEmi"],
-      },
-    },
-    {
-      name: "compare_products",
-      description: "Compare lenders for a product type.",
-      parameters: {
-        type: "object",
-        properties: {
-          productType: { type: "string" },
-          amount: { type: "number" },
-        },
-        required: ["productType"],
       },
     },
     {
@@ -62,25 +94,36 @@ function getWebToolDeclarations() {
 
 async function executeWebTool(name: string, args: Record<string, unknown>) {
   if (name === "search_knowledge") {
-    return searchKnowledge(String(args.query || ""))
+    return searchKnowledge({
+      loanType: args.loanType ? String(args.loanType) : undefined,
+      bankCode: args.bankCode ? String(args.bankCode) : undefined,
+      query: String(args.query || ""),
+    })
+  }
+  if (name === "compare_products") {
+    return compareProducts({
+      loanType: String(args.loanType || args.productType || ""),
+      amount: typeof args.amount === "number" ? args.amount : undefined,
+    })
+  }
+  if (name === "get_documents") {
+    return getDocuments({
+      bankCode: String(args.bankCode || ""),
+      loanType: String(args.loanType || ""),
+    })
+  }
+  if (name === "calculate_emi") {
+    return calculateEmi({
+      principalAmount: Number(args.principalAmount || 0),
+      annualInterestRate: Number(args.annualInterestRate || 0),
+      tenureMonths: Number(args.tenureMonths || 0),
+    })
   }
   if (name === "check_eligibility") {
     return checkEligibility({
       monthlyIncome: Number(args.monthlyIncome || 0),
       monthlyObligations: Number(args.monthlyObligations || 0),
       proposedEmi: Number(args.proposedEmi || 0),
-    })
-  }
-  if (name === "compare_products") {
-    return compareProducts({
-      productType: String(args.productType || "personal_loan") as
-        | "personal_loan"
-        | "home_loan"
-        | "lap"
-        | "business_loan"
-        | "vehicle_loan"
-        | "education_loan",
-      amount: typeof args.amount === "number" ? args.amount : undefined,
     })
   }
   if (name === "capture_lead") {
