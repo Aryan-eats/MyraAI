@@ -63,6 +63,9 @@ Run one file:
 npx vitest run src/tests/web-agent.test.ts
 ```
 
+On Windows PowerShell, `npm` may be blocked by script execution policy. Use
+`npm.cmd test -- src/tests/web-agent.test.ts` when that happens.
+
 Current tests mostly mock LLMs and databases. That is good for fast behavior
 checks, but it does not prove live service credentials or live database schema.
 
@@ -84,6 +87,14 @@ Steps:
 3. Add an `executeWebTool()` branch.
 4. Tell the persona when to use it.
 5. Add one test for the routing or tool behavior.
+
+Recent web-agent tests worth copying:
+
+- `web-agent.test.ts`: language hinting, fallback behavior, tool-result summaries.
+- `web-chat-route.test.ts`: browser conversation handoff when Redis history is empty.
+- `compare-products.test.ts`: GPS backend offer matching before fallbacks.
+- `capture-lead.test.ts`: GPS backend lead creation.
+- `chat-client.test.ts`: bilingual input/rendering affordances.
 
 ### Add A Partner/Admin Tool
 
@@ -140,12 +151,15 @@ the source list until status becomes `ready` or `failed`.
 | Gotcha | Why it matters |
 | --- | --- |
 | Web mode only handles one tool call | Multi-step web answers need a loop change |
+| Web mode language is heuristic | Add examples to `detectResponseLanguage()` tests before changing it |
+| Web route trusts browser conversation only when Redis is empty | Clear Redis when testing client-side history fallback |
 | CRM mode throws on loop exhaustion | Route returns 500 if the model never emits final text |
 | Redis failures are swallowed | Local behavior may differ from production history/cache |
 | `allowedDomains` is stored but not fully enforced | Do not assume per-bot embed domain protection exists |
 | Knowledge routes lack owner auth | Fix before production multi-tenant use |
 | `db/crm_assistant_schema.sql` is not current live schema | Do not test `loanDb.ts` against it |
 | `GPS_JWT_PUBLIC_KEY` is optional | Without it, JWT signature validation is skipped |
+| `GPS_INDIA_API_URL` changes public web behavior | Offer matching and lead capture call the backend before local fallbacks |
 | Direct Gemini calls remain | Embeddings/docs can fail even if text LLM fallback works |
 
 ## Code Style In This Repo
@@ -178,4 +192,3 @@ npm run build
 
 For UI work, start the dev server and manually exercise the route/page you
 changed.
-

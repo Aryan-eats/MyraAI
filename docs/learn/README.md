@@ -26,7 +26,7 @@ Browser UI
   -> Next.js route handlers in src/app/api
   -> agent loops in src/agents or bot RAG in /api/chat
   -> shared lib adapters in src/lib
-  -> MongoDB, Redis, PostgreSQL, GPS API, Gemini/OpenRouter/OpenAI/Claude
+  -> MongoDB, Redis, PostgreSQL, GPS backend API, Gemini/OpenRouter/OpenAI/Claude
 ```
 
 ## Reading Order
@@ -65,3 +65,12 @@ This guide documents the code that exists now.
 | Redis | `src/lib/gemini.ts`, `src/lib/chatCache.ts` |
 | Auth | `src/lib/getSession.ts`, `src/lib/chatAuth.ts`, `src/proxy.ts` |
 
+## Current Feature Highlights
+
+- Public web chat sends browser conversation history when Redis has no saved history, so a refreshed/new server session can still preserve context from the client.
+- Web advisor language is based on the current message first: Devanagari Hindi -> Hindi, Roman Hindi -> Hinglish, English -> English, with immediate switching.
+- Web advisor comparison can call the GPS backend `/api/leads/match-offers` before falling back to PostgreSQL and MongoDB.
+- Web lead capture can create leads through the GPS backend `/api/leads`; webhook/local stub paths remain fallbacks.
+- Partner/admin chat auth resolves identity from GPS `/api/auth/me` and normalizes both old flat responses and the current nested backend shape.
+- LLM router logs provider failures and all-provider failures before falling through.
+- The seed knowledge file now documents public loan products, FOIR, lead capture, CRM, admin, WhatsApp, document analysis, soft checks, commissions, audit logs, and common answers.

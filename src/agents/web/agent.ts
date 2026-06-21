@@ -84,6 +84,11 @@ function getWebToolDeclarations() {
         properties: {
           name: { type: "string" },
           phone: { type: "string" },
+          loanType: { type: "string" },
+          loanAmount: { type: "number" },
+          email: { type: "string" },
+          city: { type: "string" },
+          employmentType: { type: "string" },
           intentSummary: { type: "string" },
         },
         required: ["name", "phone", "intentSummary"],
@@ -130,6 +135,11 @@ async function executeWebTool(name: string, args: Record<string, unknown>) {
     return captureLead({
       name: String(args.name || ""),
       phone: String(args.phone || ""),
+      loanType: args.loanType ? String(args.loanType) : undefined,
+      loanAmount: typeof args.loanAmount === "number" ? args.loanAmount : undefined,
+      email: args.email ? String(args.email) : undefined,
+      city: args.city ? String(args.city) : undefined,
+      employmentType: args.employmentType ? String(args.employmentType) : undefined,
       intentSummary: String(args.intentSummary || "website inquiry"),
     })
   }
@@ -141,26 +151,108 @@ function fallbackWebsiteReply() {
   return "I can help with loan products, eligibility, documentation, and next steps. Please share your loan type and approximate amount, and I will guide you."
 }
 
+function messageText(message: GeminiMessage) {
+  if (typeof message.content === "string") {
+    return message.content
+  }
+  return message.content.parts.map((part) => part.text ?? "").join(" ")
+}
+
+function detectResponseLanguage(message: string, conversationHistory: GeminiMessage[]) {
+  if (/[\u0900-\u097F]/.test(message)) {
+    return "Hindi"
+  }
+
+  const romanHindi =
+    /\b(aap|aapko|apko|mujhe|mera|meri|mere|chahiye|chaiye|kya|kaise|kitna|kitni|loan ke|documents chahiye|ke baare|baare m|batao|sabse|ache|acche)\b/i
+  if (romanHindi.test(message)) {
+    return "Hinglish"
+  }
+  if (/[A-Za-z]/.test(message)) {
+    return "English"
+  }
+
+  const recentText = conversationHistory.slice(-4).map(messageText).join(" ")
+  if (/[\u0900-\u097F]/.test(recentText)) {
+    return "Hindi"
+  }
+  if (romanHindi.test(recentText)) {
+    return "Hinglish"
+  }
+
+  return "English"
+}
+
+function logWebAgentFailure(stage: string, error: unknown, details: Record<string, unknown> = {}) {
+  console.error("[myra-web-agent]", stage, {
+    error: error instanceof Error ? error.message : String(error),
+    ...details,
+  })
+}
+
+function summarizeToolResult(toolName: string, toolResult: unknown) {
+  if (toolName === "compare_products") {
+    const comparison = (toolResult as { comparison?: Array<Record<string, unknown>> }).comparison ?? []
+    if (comparison.length) {
+      return [
+        "Loan options",
+        "",
+        ...comparison.map((item) => {
+          const fee = item.processingFee ? `, processing fee: ${item.processingFee}` : ""
+          return `- **${String(item.bankName)}:** ${String(item.rateRange)} interest${fee}`
+        }),
+      ].join("\n")
+    }
+  }
+
+  if (toolName === "get_documents") {
+    const result = toolResult as { available?: boolean; mandatoryDocs?: string[]; optionalDocs?: string[]; reason?: string }
+    if (!result.available) {
+      return result.reason || "I could not find a published document checklist for that bank and loan type."
+    }
+    return [
+      "Documents required",
+      "",
+      "**Mandatory Documents:**",
+      ...(result.mandatoryDocs ?? []).map((doc) => `- ${doc}`),
+      "",
+      "**Optional Documents:**",
+      ...((result.optionalDocs?.length ? result.optionalDocs : ["None listed"]).map((doc) => `- ${doc}`)),
+    ].join("\n")
+  }
+
+  return ""
+}
+
 export async function runWebAgent(
   message: string,
   conversationHistory: GeminiMessage[],
 ): Promise<AgentResponse> {
   const messages = [...conversationHistory, { role: "user" as const, content: message }]
+  const systemInstruction = `${getWebSystemPrompt()}\nPreferred response language: ${detectResponseLanguage(message, conversationHistory)}.`
 
   let firstPass
   try {
     firstPass = await generateWithTools({
-      systemInstruction: getWebSystemPrompt(),
+      systemInstruction,
       tools: [{ functionDeclarations: getWebToolDeclarations() }],
       messages,
       temperature: 0.1,
     })
-  } catch {
+  } catch (error) {
+    logWebAgentFailure("first_pass_failed", error, {
+      message,
+      conversationTurns: conversationHistory.length,
+    })
     return { text: fallbackWebsiteReply(), toolsUsed: [] }
   }
 
   const candidate = firstPass.candidates?.[0]
   if (!candidate?.content?.parts?.length) {
+    console.error("[myra-web-agent]", "first_pass_empty", {
+      message,
+      conversationTurns: conversationHistory.length,
+    })
     return { text: "I am unable to respond right now.", toolsUsed: [] }
   }
 
@@ -173,7 +265,11 @@ export async function runWebAgent(
   let toolResult: unknown
   try {
     toolResult = await executeWebTool(toolCall.name, toolCall.args || {})
-  } catch {
+  } catch (error) {
+    logWebAgentFailure("tool_execution_failed", error, {
+      toolName: toolCall.name,
+      message,
+    })
     const text = "I could not complete that action right now. I can still explain rates, docs, and eligibility if you share your loan type and amount."
     return { text, toolsUsed: [] }
   }
@@ -181,7 +277,7 @@ export async function runWebAgent(
   let secondPass
   try {
     secondPass = await generateWithTools({
-      systemInstruction: getWebSystemPrompt(),
+      systemInstruction,
       tools: [{ functionDeclarations: getWebToolDeclarations() }],
       messages: [
         ...messages,
@@ -206,18 +302,31 @@ export async function runWebAgent(
         },
       ],
     })
-  } catch {
+  } catch (error) {
+    logWebAgentFailure("second_pass_failed", error, {
+      toolName: toolCall.name,
+      message,
+    })
+    const text = summarizeToolResult(toolCall.name, toolResult)
     return {
-      text: fallbackWebsiteReply(),
+      text: text || fallbackWebsiteReply(),
       toolsUsed: [toolCall.name],
       leadCaptured: toolCall.name === "capture_lead",
     }
   }
 
   const finalText = secondPass.candidates?.[0]?.content?.parts?.map((p) => p.text || "").join("") || ""
+  const text = finalText || summarizeToolResult(toolCall.name, toolResult)
+
+  if (!finalText) {
+    console.error("[myra-web-agent]", "second_pass_empty", {
+      toolName: toolCall.name,
+      message,
+    })
+  }
 
   return {
-    text: finalText || fallbackWebsiteReply(),
+    text: text || fallbackWebsiteReply(),
     toolsUsed: [toolCall.name],
     leadCaptured: toolCall.name === "capture_lead",
   }

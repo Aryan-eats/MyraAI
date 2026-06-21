@@ -6,15 +6,32 @@ import {
   saveConversationHistory,
   summarizeAndCloseConversation,
 } from "@/lib/gemini"
+import type { GeminiMessage } from "@/types/agents"
 
 type WebChatBody = {
   message: string
   sessionId?: string
   endSession?: boolean
+  conversation?: Array<{ role: "user" | "assistant"; text: string }>
 }
 
 function jsonResponse(payload: Record<string, unknown>, status = 200) {
   return NextResponse.json(payload, { status })
+}
+
+function clientConversationToGemini(conversation: WebChatBody["conversation"]): GeminiMessage[] {
+  const history = (conversation ?? [])
+    .filter((message) => message.text.trim())
+    .map((message) => ({
+      role: message.role === "assistant" ? "model" : "user",
+      content: message.text.trim(),
+    }))
+    .slice(-20)
+
+  while (history[0]?.role === "model") {
+    history.shift()
+  }
+  return history
 }
 
 export async function POST(req: NextRequest) {
@@ -32,7 +49,8 @@ export async function POST(req: NextRequest) {
     }
 
     const sessionId = body.sessionId || req.headers.get("x-session-id") || crypto.randomUUID()
-    const history = await loadConversationHistory(sessionId)
+    const serverHistory = await loadConversationHistory(sessionId)
+    const history = serverHistory.length ? serverHistory : clientConversationToGemini(body.conversation)
 
     const result = await runWebAgent(body.message, history)
 

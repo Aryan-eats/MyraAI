@@ -7,8 +7,9 @@ This is a Next.js App Router application for Myra AI. It combines:
 - A multi-tenant embeddable chatbot platform.
 - GPS India lending chatbots and copilots.
 - Knowledge ingestion and RAG for custom bots.
-- Lender/product queries from PostgreSQL or MongoDB fallback data.
+- Lender/product queries from GPS backend offers, PostgreSQL, or MongoDB fallback data.
 - Partner/admin CRM visibility and selected CRM actions.
+- Hindi, Hinglish, and English public borrower chat.
 
 ## Stack
 
@@ -142,6 +143,10 @@ Vitest tests. They mostly mock LLM and DB dependencies so they run quickly.
 Useful starting tests:
 
 - `web-agent.test.ts`
+- `web-chat-route.test.ts`
+- `chat-client.test.ts`
+- `compare-products.test.ts`
+- `capture-lead.test.ts`
 - `partner-chatbot.test.ts`
 - `admin-chatbot.test.ts`
 - `crm-agent.test.ts`
@@ -174,5 +179,9 @@ this guide. Notable current-state facts:
 - `public/chatBot.js` is deleted; `public/widget.js` is the current widget.
 - `/api/settings/get` appears as a deleted/stale path in file listings; current settings are in `/api/settings`.
 - New `admin` and `partner` agents exist and are wired to `/api/chat/admin` and `/api/chat/partner`.
+- Public web chat now sends browser-side conversation history to `/api/chat/web`; the route uses it only when Redis has no server history for the session.
+- Web language detection is explicit in `src/agents/web/agent.ts`: current Devanagari Hindi returns Hindi, Roman Hindi returns Hinglish, English returns English, and history is only a fallback.
+- `compare_products` tries the configured GPS backend match-offers endpoint before local PostgreSQL/MongoDB data.
+- `capture_lead` creates backend leads when `GPS_INDIA_API_URL` is configured and required lead fields are present.
+- `chatAuth.ts` calls `/api/auth/me`, not the older `/internal/me`, and normalizes the current nested backend response.
 - Several docs under `docs/` still describe earlier architecture.
-

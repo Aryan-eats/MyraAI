@@ -30,6 +30,8 @@ type MeResponse = {
   tier?: string
 }
 
+type BackendMeResponse = MeResponse | { data?: { user?: Record<string, unknown> } }
+
 const ANONYMOUS_USER: ChatUser = {
   userId: "anonymous",
   userRole: "anonymous",
@@ -46,6 +48,50 @@ function getTokenFromRequest(req: NextRequest) {
   return req.nextUrl.searchParams.get("gpsToken")
 }
 
+function normalizeRole(role: unknown): MeResponse["userRole"] | null {
+  if (role === "customer" || role === "partner" || role === "admin") {
+    return role
+  }
+  return null
+}
+
+function valueAsString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value : undefined
+}
+
+function normalizeMeResponse(payload: BackendMeResponse): MeResponse | null {
+  if ("userId" in payload && "userRole" in payload) {
+    return payload as MeResponse
+  }
+
+  const user = payload.data?.user
+  if (!user) {
+    return null
+  }
+
+  const userId = valueAsString(user.userId) ?? valueAsString(user.id)
+  const userRole = normalizeRole(user.userRole ?? user.role)
+  if (!userId || !userRole) {
+    return null
+  }
+
+  const firstName = valueAsString(user.firstName)
+  const lastName = valueAsString(user.lastName)
+  const fullName = [firstName, lastName].filter(Boolean).join(" ")
+
+  return {
+    userId,
+    userRole,
+    entityId:
+      valueAsString(user.entityId) ??
+      valueAsString(user.partnerId) ??
+      valueAsString(user.partnerOrgId) ??
+      (userRole === "partner" ? userId : null),
+    name: valueAsString(user.name) ?? (fullName || undefined),
+    tier: valueAsString(user.tier),
+  }
+}
+
 async function fetchMe(token: string): Promise<MeResponse | null> {
   const baseUrl = process.env.GPS_INDIA_API_URL
   if (!baseUrl) {
@@ -53,7 +99,7 @@ async function fetchMe(token: string): Promise<MeResponse | null> {
   }
 
   try {
-    const response = await fetch(`${baseUrl}/internal/me`, {
+    const response = await fetch(`${baseUrl.replace(/\/$/, "")}/api/auth/me`, {
       method: "GET",
       headers: { Authorization: `Bearer ${token}` },
       cache: "no-store",
@@ -63,7 +109,7 @@ async function fetchMe(token: string): Promise<MeResponse | null> {
       return null
     }
 
-    return (await response.json()) as MeResponse
+    return normalizeMeResponse((await response.json()) as BackendMeResponse)
   } catch {
     return null
   }

@@ -44,10 +44,11 @@ Files:
 Flow:
 
 ```text
-POST /api/chat/web { message, sessionId?, endSession? }
+POST /api/chat/web { message, sessionId?, endSession?, conversation? }
   -> reject if no configured LLM provider
   -> sessionId from body, x-session-id, or random UUID
   -> load Redis history
+  -> if Redis history is empty, convert browser conversation to Gemini history
   -> runWebAgent(message, history)
   -> save user/model turns to Redis
   -> optionally summarize and close
@@ -59,24 +60,34 @@ Tools:
 | Tool name | Implementation | Purpose |
 | --- | --- | --- |
 | `search_knowledge` | `searchKnowledge.ts` | Bank/product rates, fees, TAT, supported loan types |
-| `compare_products` | `compareProducts.ts` | Compare banks for one loan type |
+| `compare_products` | `compareProducts.ts` | Compare banks for one loan type, backend-first when configured |
 | `get_documents` | `getDocuments.ts` | Official bank and loan document checklist |
 | `calculate_emi` | `calculateEmi.ts` | Pure EMI math |
 | `check_eligibility` | `checkEligibility.ts` | FOIR-based indicative eligibility |
-| `capture_lead` | `captureLead.ts` | Send callback lead to webhook or local stub result |
+| `capture_lead` | `captureLead.ts` | Create GPS backend lead, or use webhook/local stub fallback |
 
 Important behavior:
 
 - Web mode is a two-pass, single-tool flow.
 - It executes only the first tool call returned by the first model response.
-- It catches model/tool failures and returns a helpful fallback.
+- It catches model/tool failures, logs the failed stage, and returns a helpful fallback.
+- If final model formatting fails after `compare_products` or `get_documents`, it can summarize the tool result instead of returning a generic fallback.
+- It adds a `Preferred response language` hint on each model call. The current message wins: Devanagari Hindi -> Hindi, Roman Hindi -> Hinglish, English -> English.
 - It should never ask for Aadhaar, PAN, bank account numbers, or OTPs.
 
 Data source:
 
-- If `DATABASE_URL` is set, product and document tools use PostgreSQL.
+- `compare_products` first tries `GPS_INDIA_API_URL/api/leads/match-offers`.
+- If the backend is unavailable or returns no offers, product/document tools use PostgreSQL when `DATABASE_URL` is set.
 - If PostgreSQL is absent, product search/comparison falls back to MongoDB
   `lending_products`.
+- `capture_lead` posts to `GPS_INDIA_API_URL/api/leads` when configured and when `loanType` and `loanAmount` are available; otherwise it falls back to `GPS_INDIA_WEBHOOK_URL` or a local captured result.
+
+UI behavior:
+
+- `ChatClient` sends the browser `conversation` array for both web and CRM payloads.
+- Web chat bubbles and input use `dir="auto"` so Hindi, Hinglish, and English render in the expected direction.
+- The web input placeholder is bilingual: `Ask about loans... / लोन के बारे में पूछें`.
 
 ## Partner Chatbot
 
@@ -272,4 +283,3 @@ Use this order:
 5. Confirm the tool returned the data you expected.
 6. Confirm the persona tells the model how to use that data.
 7. Add or update the smallest test that would have caught the bad behavior.
-

@@ -60,7 +60,11 @@ Partner/admin chat uses a GPS token from either:
 
 `src/lib/chatAuth.ts` optionally validates JWT signature when
 `GPS_JWT_PUBLIC_KEY` is configured. It then resolves identity through
-`GPS_INDIA_API_URL/internal/me`.
+`GPS_INDIA_API_URL/api/auth/me`.
+
+`chatAuth.ts` accepts both the older flat `/me` response shape and the current
+GPS backend shape `{ data: { user } }`, deriving `userId`, role, name, tier, and
+partner/entity scope from either format.
 
 When `DATABASE_URL` exists:
 
@@ -108,6 +112,10 @@ Gemini-like shape:
 
 That lets all agent loops inspect only `parts`, `text`, and `functionCall`.
 
+Provider failures are logged with `[llm-router] provider_failed`; if every
+enabled provider fails, the router logs `[llm-router] all_providers_failed`
+before throwing.
+
 ## State
 
 | Store | Used for | Code |
@@ -115,7 +123,7 @@ That lets all agent loops inspect only `parts`, `text`, and `functionCall`.
 | MongoDB | Bots, bot knowledge, widget sessions, settings, lending fallback, briefings | `src/model/*`, `src/lib/db.ts` |
 | Redis | First-party chat history, cache, WhatsApp rate counters | `src/lib/gemini.ts`, `src/lib/chatCache.ts` |
 | PostgreSQL | Live GPS banks, docs, leads, partners, users | `src/lib/pgClient.ts`, `loanDb.ts`, `crmDb.ts`, `adminDb.ts` |
-| GPS API | Legacy/CRM bridge calls and service auth flows | `src/lib/gpsBridge.ts` |
+| GPS API | CRM bridge calls, auth identity, public offer matching, public lead creation | `src/lib/gpsBridge.ts`, `chatAuth.ts`, web tools |
 | Meta WhatsApp | Template sends | `src/lib/whatsapp.ts` |
 
 ## Data Flow Patterns
@@ -139,11 +147,17 @@ widget.js
 ChatClient
   -> POST /api/chat/<mode>
   -> load Redis history conv:<sessionId>
+  -> web mode may fall back to browser-provided conversation if Redis is empty
   -> run<Mode>Agent(message, history, auth?)
   -> generateWithTools()
   -> execute tool calls
   -> save Redis history
 ```
+
+For public web chat, `ChatClient` sends the visible browser conversation with
+each request. `/api/chat/web` still prefers Redis history when available, but
+uses that client conversation to preserve context when the server has no saved
+history.
 
 ### Knowledge Ingestion
 
@@ -189,8 +203,8 @@ Most changes become simple if you pick the right layer:
 | Add tool to an agent | `src/agents/<mode>/agent.ts` plus `tools/*` |
 | Change provider fallback | `src/lib/llm/router.ts` |
 | Change public bot answers | `/api/chat` bot flow and retrieval |
-| Change lender/product data behavior | `src/lib/loanDb.ts`, `src/lib/knowledgeBase.ts` |
+| Change lender/product data behavior | `src/agents/web/tools/compareProducts.ts`, `src/lib/loanDb.ts`, `src/lib/knowledgeBase.ts` |
+| Change web chat language behavior | `src/agents/web/agent.ts`, `src/agents/web/persona.ts` |
 | Change partner data visibility | `src/lib/crmDb.ts`, `src/lib/chatAuth.ts` |
 | Change admin data visibility | `src/lib/adminDb.ts`, `src/lib/chatAuth.ts` |
 | Change widget UI | `public/widget.js`, `src/components/Chat/EmbedChat.tsx` |
-

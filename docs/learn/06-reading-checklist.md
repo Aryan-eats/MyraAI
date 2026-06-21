@@ -42,11 +42,13 @@ Verify:
 - Name which mode can send WhatsApp.
 - Explain why web mode cannot currently call two tools in one request.
 - Explain why CRM mode can execute multiple tool calls per model turn.
+- Explain how web mode decides between Hindi, Hinglish, and English.
+- Explain why the current user message overrides earlier chat language.
 
 Small experiment:
 
 ```bash
-npm test -- src/tests/web-agent.test.ts src/tests/partner-chatbot.test.ts src/tests/admin-chatbot.test.ts
+npm test -- src/tests/web-agent.test.ts src/tests/web-chat-route.test.ts src/tests/partner-chatbot.test.ts src/tests/admin-chatbot.test.ts
 ```
 
 ## Day 3: Follow Storage
@@ -86,6 +88,7 @@ Read:
 Verify:
 
 - Find every place partner scope is resolved or enforced.
+- Explain how `/api/auth/me` is normalized in `chatAuth.ts`.
 - Explain why admin queries do not filter by partner.
 - Explain why `db/crm_assistant_schema.sql` is not enough for current Postgres helpers.
 
@@ -110,13 +113,16 @@ Verify:
 
 - Explain default LLM provider order.
 - Explain why `GEMINI_API_KEY` is still needed even if OpenRouter works.
+- Explain what the LLM router logs when a provider fails.
+- Explain when web offer comparison uses GPS backend, PostgreSQL, or MongoDB.
+- Explain when web lead capture uses GPS backend, webhook, or local stub.
 - Explain WhatsApp block/stub/send paths.
 - Explain what credentials are needed for morning briefings.
 
 Small experiment:
 
 ```bash
-npm test -- src/tests/llm-router.test.ts src/tests/analyse-document.test.ts src/tests/send-whatsapp-message.test.ts
+npm test -- src/tests/llm-router.test.ts src/tests/compare-products.test.ts src/tests/capture-lead.test.ts src/tests/analyse-document.test.ts src/tests/send-whatsapp-message.test.ts
 ```
 
 ## Day 6: Make One Tiny Safe Change
@@ -136,10 +142,12 @@ Then run the smallest related test. If no test exists, add one small test.
 - Which code path uses `KnowledgeChunk`?
 - Which code path uses `lending_products`?
 - Which code path uses `banks` and `lender_doc_requirements`?
+- Which code path uses `/api/leads/match-offers`?
+- Which code path uses `/api/leads`?
 - What breaks if Redis is down?
 - What breaks if MongoDB is down?
 - What breaks if `DATABASE_URL` is missing?
+- What changes when `GPS_INDIA_API_URL` is configured?
 - What happens if `GPS_JWT_PUBLIC_KEY` is missing?
 - Which routes should be hardened before production multi-tenant use?
 - Where would you add a new CRM write action, and where would you test it?
-

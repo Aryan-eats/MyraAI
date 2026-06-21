@@ -29,7 +29,38 @@ describe("chatAuth", () => {
     })
 
     const auth = await requirePartnerAuth(req)
+    expect(global.fetch).toHaveBeenCalledWith("http://gps.local/api/auth/me", expect.any(Object))
     expect(auth?.partnerId).toBe("p1")
     expect(auth?.token).toBe("test-token")
+  })
+
+  it("normalizes the backend auth user response", async () => {
+    process.env.GPS_INDIA_API_URL = "http://gps.local"
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        success: true,
+        data: {
+          user: {
+            id: "u2",
+            role: "admin",
+            firstName: "Ada",
+            lastName: "Lovelace",
+          },
+        },
+      }),
+    } as never)
+
+    const req = new NextRequest("http://localhost/api/chat", {
+      headers: { authorization: "Bearer test-token" },
+    })
+
+    const user = await getChatUser(req)
+    expect(user).toMatchObject({
+      authenticated: true,
+      userId: "u2",
+      userRole: "admin",
+      entityId: null,
+    })
   })
 })

@@ -112,9 +112,12 @@ Security rule: never select encrypted sensitive columns such as
 
 ## GPS Backend API
 
-Wrapper:
+Wrappers and direct callers:
 
 - `src/lib/gpsBridge.ts`
+- `src/lib/chatAuth.ts`
+- `src/agents/web/tools/compareProducts.ts`
+- `src/agents/web/tools/captureLead.ts`
 
 Env:
 
@@ -137,6 +140,17 @@ The bridge:
 
 The codebase currently has both direct PostgreSQL paths and GPS API bridge
 paths. Read the specific tool before assuming which one is used.
+
+Current direct GPS backend calls:
+
+| Caller | Endpoint | Purpose |
+| --- | --- | --- |
+| `chatAuth.ts` | `GET /api/auth/me` | Resolve partner/admin/customer identity from a GPS JWT |
+| `compareProducts.ts` | `POST /api/leads/match-offers` | Get public lender offers before local DB fallbacks |
+| `captureLead.ts` | `POST /api/leads` | Create a public lead after clear borrower intent |
+
+`chatAuth.ts` normalizes both old flat identity payloads and the current nested
+`{ data: { user } }` payload.
 
 ## LLM Providers
 
@@ -174,6 +188,10 @@ provider.
 Firecrawl is used only when the PostgreSQL loan database has no usable answer
 for a bank/loan question. Those responses are returned with
 `Source: Web search via Firecrawl`.
+
+Operational note: the router logs each failed provider and then logs the full
+enabled-provider failure list when all providers fail. Live key health still has
+to be tested with a real outbound request; unit tests mock providers.
 
 ## ScaleKit
 
@@ -251,12 +269,12 @@ Add for first-party lending chat with live data:
 ```env
 DATABASE_URL=
 REDIS_URL=redis://127.0.0.1:6379
+GPS_INDIA_API_URL=
 ```
 
 Add for authenticated partner/admin paths:
 
 ```env
-GPS_INDIA_API_URL=
 GPS_JWT_PUBLIC_KEY=
 GPS_JWT_ISSUER=
 GPS_JWT_AUDIENCE=

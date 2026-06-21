@@ -83,7 +83,7 @@ function ChatClient({ ownerId = "", mode }: ChatClientProps) {
       const payload =
         mode === "crm"
           ? { message: text, conversation, sessionId }
-          : { message: text, sessionId }
+          : { message: text, conversation, sessionId }
 
       const response = await fetch(config.endpoint, {
         method: "POST",
@@ -203,6 +203,7 @@ function ChatClient({ ownerId = "", mode }: ChatClientProps) {
                 {messages.map((message) => (
                   <div
                     key={message.id}
+                    dir="auto"
                     className={`max-w-[80%] rounded-xl px-4 py-3 text-sm ${
                       message.role === "user" ? "ml-auto bg-black text-white" : "border"
                     }`}
@@ -222,6 +223,8 @@ function ChatClient({ ownerId = "", mode }: ChatClientProps) {
             <div className="p-4 border-t flex items-center gap-3" style={{ borderColor: "var(--border)", backgroundColor: "var(--surface)" }}>
               <input
                 value={input}
+                dir="auto"
+                lang="hi"
                 onChange={(event) => setInput(event.target.value)}
                 onKeyDown={(event) => {
                   if (event.key === "Enter") {
@@ -231,7 +234,7 @@ function ChatClient({ ownerId = "", mode }: ChatClientProps) {
                 placeholder={
                   mode === "crm"
                     ? "Ask about pending cases, commissions, reminders, and approval blockers..."
-                    : "Ask about products, process, eligibility basics, and required documents..."
+                    : "Ask about loans... / लोन के बारे में पूछें"
                 }
                 className="w-full rounded-xl border px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-black/80"
                 style={{ borderColor: "var(--border)", backgroundColor: "var(--surface)" }}

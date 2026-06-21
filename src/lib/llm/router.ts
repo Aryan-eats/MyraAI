@@ -526,10 +526,18 @@ async function runWithFallback<T>(execute: (provider: ProviderName) => Promise<T
     try {
       return await execute(provider)
     } catch (error) {
+      console.error("[llm-router]", "provider_failed", {
+        provider,
+        error: error instanceof Error ? error.message : String(error),
+      })
       failures.push(`${provider}:${String(error)}`)
     }
   }
 
+  console.error("[llm-router]", "all_providers_failed", {
+    providers: getEnabledProviders(),
+    failures,
+  })
   throw new Error(`All configured LLM providers failed. ${failures.join(" | ")}`)
 }
 
