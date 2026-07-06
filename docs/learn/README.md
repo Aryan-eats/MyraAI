@@ -1,76 +1,78 @@
-# Learn This Repository
+# Learn Myra AI
 
-This folder is a study guide for onboarding onto the current working tree of
-the Myra AI app. It assumes your shell is inside the app root:
+This folder explains the project for someone joining from outside the team.
+Start here before reading source code.
 
-```bash
-cd agent
-```
+## Product In One Paragraph
 
-The outer workspace also has a directory named `agent`; the real Next.js app,
-`package.json`, `src/`, and this `docs/learn` folder are inside that nested app.
+Myra AI is a lending assistant platform. It has a public loan chatbot for
+borrowers and authenticated assistants for CRM users. The public chatbot answers
+loan questions, compares products, estimates eligibility, and captures leads.
+The CRM assistant helps partners and operations users check pipeline status,
+review documents, run soft checks, send WhatsApp follow-ups, and generate daily
+briefings.
 
-## Mental Model
+## Who Uses It
 
-Myra AI has two product shapes in one Next.js codebase:
+| User | What they do | Main route |
+| --- | --- | --- |
+| Borrower | Ask about loans, documents, rates, EMI, eligibility | `/chat?mode=web` |
+| Partner CRM user | Follow up leads, check pipeline, run CRM actions | `/chat?mode=crm` |
+| Partner viewer | Read partner pipeline and commissions | `/chat?mode=partner` |
+| Admin or ops user | Read platform-wide metrics | `/chat?mode=admin` |
+| Bot owner | Manage older embeddable bots and knowledge | `/dashboard` |
 
-1. Embedded bot platform: dashboard users create bots, add knowledge, copy
-   `public/widget.js`, and the widget calls `/api/chat` with a `botId`.
-2. GPS India lending assistants: first-party chat modes for public borrowers,
-   partners, admins, and CRM operations.
+## Read In This Order
 
-The important split is this:
+1. [01-project-map.md](01-project-map.md): product map, repo layout, glossary.
+2. [02-architecture.md](02-architecture.md): how requests move through the app.
+3. [03-chat-flows.md](03-chat-flows.md): every assistant from UI to response.
+4. [04-data-and-integrations.md](04-data-and-integrations.md): databases, APIs, LLMs, feature flags.
+5. [05-development-playbook.md](05-development-playbook.md): setup, tests, common changes.
+6. [06-reading-checklist.md](06-reading-checklist.md): onboarding exercises.
+
+## Fast Mental Model
 
 ```text
-Browser UI
-  -> Next.js route handlers in src/app/api
-  -> agent loops in src/agents or bot RAG in /api/chat
-  -> shared lib adapters in src/lib
-  -> MongoDB, Redis, PostgreSQL, GPS backend API, Gemini/OpenRouter/OpenAI/Claude
+Browser
+  -> Next.js page or API route in src/app
+  -> agent loop in src/agents/<mode>
+  -> typed tools in src/agents/<mode>/tools
+  -> shared adapters in src/lib
+  -> MongoDB, Redis, PostgreSQL, GPS backend, WhatsApp, or LLM provider
 ```
 
-## Reading Order
+Prompts decide what the assistant should try. TypeScript code decides what is
+allowed, which data can be accessed, and which external service is called.
 
-Read these in order:
+## Main Code Areas
 
-1. [01-project-map.md](01-project-map.md): where things live and what to read first.
-2. [02-architecture.md](02-architecture.md): runtime architecture, auth, state, and risk boundaries.
-3. [03-chat-flows.md](03-chat-flows.md): every chat mode from request to response.
-4. [04-data-and-integrations.md](04-data-and-integrations.md): databases, env vars, external services.
-5. [05-development-playbook.md](05-development-playbook.md): setup, tests, common change patterns.
-6. [06-reading-checklist.md](06-reading-checklist.md): practical exercises to verify understanding.
-
-## Current Repo Caveat
-
-Some older docs in `docs/` are stale. In particular, references to
-`src/server/crm-assistant`, `public/chatBot.js`, and `/api/crm-assistant` do not
-match the current working tree because those files are deleted or absent here.
-
-This guide documents the code that exists now.
-
-## Fast Summary
-
-| Area | Main files |
+| Area | Files |
 | --- | --- |
-| App shell | `src/app/page.tsx`, `src/app/chat/page.tsx`, `src/app/dashboard/*` |
-| Chat UI | `src/components/ChatClient.tsx`, `src/components/Chat/EmbedChat.tsx` |
-| Embedded widget | `public/widget.js`, `/embed`, `/api/chat` with `botId` |
-| Web lending agent | `src/agents/web/*`, `/api/chat/web` |
-| Partner chatbot | `src/agents/partner/*`, `/api/chat/partner` |
-| Admin chatbot | `src/agents/admin/*`, `/api/chat/admin` |
-| CRM copilot | `src/agents/crm/*`, `/api/chat/crm` |
-| LLM routing | `src/lib/gemini.ts`, `src/lib/llm/router.ts` |
-| MongoDB | `src/lib/db.ts`, `src/model/*`, `src/lib/knowledgeBase.ts` |
-| PostgreSQL | `src/lib/pgClient.ts`, `src/lib/loanDb.ts`, `src/lib/crmDb.ts`, `src/lib/adminDb.ts` |
-| Redis | `src/lib/gemini.ts`, `src/lib/chatCache.ts` |
-| Auth | `src/lib/getSession.ts`, `src/lib/chatAuth.ts`, `src/proxy.ts` |
+| Chat page | `src/app/chat/page.tsx`, `src/components/ChatClient.tsx` |
+| Public loan chatbot | `src/app/api/chat/web/route.ts`, `src/agents/web/*` |
+| CRM assistant | `src/app/api/chat/crm/route.ts`, `src/agents/crm/*` |
+| Partner assistant | `src/app/api/chat/partner/route.ts`, `src/agents/partner/*` |
+| Admin assistant | `src/app/api/chat/admin/route.ts`, `src/agents/admin/*` |
+| LLM fallback | `src/lib/llm/router.ts`, `src/lib/gemini.ts` |
+| Auth | `src/lib/chatAuth.ts`, `src/lib/getSession.ts`, `src/proxy.ts` |
+| Data access | `src/lib/loanDb.ts`, `src/lib/crmDb.ts`, `src/lib/adminDb.ts` |
+| CRM actions | `src/lib/gpsBridge.ts`, `src/lib/whatsapp.ts`, `src/lib/softCheckEngine.ts`, `src/lib/documentAnalyser.ts` |
 
-## Current Feature Highlights
+## Terms Used In This Project
 
-- Public web chat sends browser conversation history when Redis has no saved history, so a refreshed/new server session can still preserve context from the client.
-- Web advisor language is based on the current message first: Devanagari Hindi -> Hindi, Roman Hindi -> Hinglish, English -> English, with immediate switching.
-- Web advisor comparison can call the GPS backend `/api/leads/match-offers` before falling back to PostgreSQL and MongoDB.
-- Web lead capture can create leads through the GPS backend `/api/leads`; webhook/local stub paths remain fallbacks.
-- Partner/admin chat auth resolves identity from GPS `/api/auth/me` and normalizes both old flat responses and the current nested backend shape.
-- LLM router logs provider failures and all-provider failures before falling through.
-- The seed knowledge file now documents public loan products, FOIR, lead capture, CRM, admin, WhatsApp, document analysis, soft checks, commissions, audit logs, and common answers.
+| Term | Meaning |
+| --- | --- |
+| FOIR | Fixed obligation to income ratio, used for indicative affordability checks |
+| Lead | A borrower enquiry or loan opportunity |
+| Partner | A DSA/channel partner using the CRM |
+| Soft check | Rule-based eligibility review before formal underwriting |
+| Briefing | Daily CRM summary for follow-ups and stalled leads |
+| Tool | A TypeScript function the LLM can ask the agent to run |
+| GPS backend | External lending/CRM backend configured by `GPS_INDIA_API_URL` |
+
+## Current Caveat
+
+The repo still contains an older embeddable bot product path (`public/widget.js`,
+`/embed`, `/api/chat` with `botId`). It is documented where relevant, but the
+primary product explained here is the loan chatbot and CRM assistant.

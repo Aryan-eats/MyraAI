@@ -7,7 +7,7 @@ npm install
 npm run dev
 ```
 
-The dev server defaults to:
+Default local URL:
 
 ```text
 http://localhost:3000
@@ -21,174 +21,131 @@ npm run build
 npm run lint
 ```
 
-Seed MongoDB lending fallback data:
+On Windows PowerShell, use `npm.cmd` if script execution policy blocks `npm`:
 
 ```bash
-npx tsx src/jobs/seedKnowledge.ts
+npm.cmd test
 ```
-
-`tsx` is not listed as a direct dependency in `package.json`, so `npx` may need
-network access the first time.
 
 ## Local Services
 
-There is a `docker-compose.yml` with Redis and PostgreSQL. Redis matches the
-current app. PostgreSQL does not fully match current code until these are fixed:
+`docker-compose.yml` provides local Redis and PostgreSQL containers. Redis
+matches the app. PostgreSQL needs care because current code reads
+`DATABASE_URL` and expects the live GPS schema, not the older checked-in SQL
+file.
 
-- The app reads `DATABASE_URL`, but compose sets `POSTGRES_URL`.
-- The mounted SQL schema is not the real GPS schema expected by `loanDb.ts`,
-  `crmDb.ts`, and `adminDb.ts`.
+For realistic lending/CRM testing, point `DATABASE_URL` and `GPS_INDIA_API_URL`
+at a real dev backend.
 
-For local work, either point `DATABASE_URL` at the real/dev GPS database, or
-add a local schema that matches the current helper queries.
-
-## Test Strategy
+## Tests
 
 Vitest config:
 
 - `vitest.config.mjs`
-- Node environment.
-- Alias `@` to `src`.
-- Includes `src/tests/**/*.test.ts`.
+- Tests live in `src/tests/**/*.test.ts`.
+- External LLM, DB, and API calls are usually mocked.
 
-Run everything:
+Run all tests:
 
 ```bash
 npm test
 ```
 
-Run one file:
+Run a focused file:
 
 ```bash
 npx vitest run src/tests/web-agent.test.ts
 ```
 
-On Windows PowerShell, `npm` may be blocked by script execution policy. Use
-`npm.cmd test -- src/tests/web-agent.test.ts` when that happens.
+## Common Changes
 
-Current tests mostly mock LLMs and databases. That is good for fast behavior
-checks, but it does not prove live service credentials or live database schema.
+### Change public loan chatbot behavior
 
-## Common Change Patterns
+Start with:
 
-### Add A Web-Agent Tool
-
-Files usually touched:
-
-- `src/agents/web/tools/<tool>.ts`
-- `src/agents/web/agent.ts`
 - `src/agents/web/persona.ts`
-- `src/tests/web-agent.test.ts` or a focused tool test
+- `src/agents/web/agent.ts`
+- `src/agents/web/tools/*`
+- `src/app/api/chat/web/route.ts`
 
-Steps:
+Add or update one focused test, usually in:
 
-1. Implement the tool as a plain function.
-2. Add a function declaration in `getWebToolDeclarations()`.
-3. Add an `executeWebTool()` branch.
-4. Tell the persona when to use it.
-5. Add one test for the routing or tool behavior.
+- `src/tests/web-agent.test.ts`
+- `src/tests/web-chat-route.test.ts`
+- `src/tests/compare-products.test.ts`
+- `src/tests/capture-lead.test.ts`
 
-Recent web-agent tests worth copying:
+### Add a web-agent tool
 
-- `web-agent.test.ts`: language hinting, fallback behavior, tool-result summaries.
-- `web-chat-route.test.ts`: browser conversation handoff when Redis history is empty.
-- `compare-products.test.ts`: GPS backend offer matching before fallbacks.
-- `capture-lead.test.ts`: GPS backend lead creation.
-- `chat-client.test.ts`: bilingual input/rendering affordances.
+1. Add the tool function in `src/agents/web/tools`.
+2. Add its declaration in `getWebToolDeclarations()`.
+3. Add dispatch in the web agent.
+4. Update the persona only if the model needs a new usage rule.
+5. Add one focused test.
 
-### Add A Partner/Admin Tool
+### Change CRM assistant behavior
 
-Files usually touched:
+Start with:
 
-- `src/agents/partner/*` or `src/agents/admin/*`
-- `src/lib/crmDb.ts` or `src/lib/adminDb.ts`
-- `src/tests/partner-chatbot.test.ts` or `src/tests/admin-chatbot.test.ts`
-
-Keep partner tools scoped to `partnerOrgId`. Keep admin tools behind
-`requireAdminAuth()`.
-
-### Add A CRM Action Tool
-
-Files usually touched:
-
-- `src/agents/crm/tools/<tool>.ts`
 - `src/agents/crm/agent.ts`
 - `src/agents/crm/persona.ts`
-- `src/lib/gpsBridge.ts` or a DB helper
+- `src/agents/crm/tools/*`
+- `src/lib/gpsBridge.ts`
 - `src/tests/crm-agent.test.ts`
 
-For action tools, do not rely on model wording for safety. Enforce scope,
-consent, rate limits, and validation in TypeScript.
+For write actions, enforce scope, consent, validation, and logging in code.
 
-### Add A Route Handler
+### Change partner/admin read behavior
 
-Follow the better existing routes:
+Partner files:
 
-- Validate request body with Zod.
-- Return stable `{ error, code }` shapes for client-handled errors.
-- Set `export const runtime = "nodejs"` if importing `pg`, `pdf-parse`,
-  `mammoth`, or other Node-only modules.
-- Derive auth identity server-side. Do not trust `ownerId` from the body for new
-  protected routes.
+- `src/agents/partner/*`
+- `src/lib/crmDb.ts`
+- `src/tests/partner-chatbot.test.ts`
 
-### Add Or Change Knowledge Ingestion
+Admin files:
 
-Files:
+- `src/agents/admin/*`
+- `src/lib/adminDb.ts`
+- `src/tests/admin-chatbot.test.ts`
 
-- `src/app/api/knowledge/upload/route.ts`
-- `src/app/api/knowledge/text/route.ts`
-- `src/app/api/knowledge/[botId]/route.ts`
-- `src/lib/parsers.ts`
-- `src/lib/chunker.ts`
-- `src/lib/embeddings.ts`
-- `src/lib/ingest.ts`
+Keep partner queries scoped. Keep admin queries behind admin auth.
 
-Remember that ingestion is async fire-and-forget from the route. The UI polls
-the source list until status becomes `ready` or `failed`.
+### Change LLM provider behavior
+
+Start with:
+
+- `src/lib/llm/router.ts`
+- `src/tests/llm-router.test.ts`
+
+Do not add provider-specific handling inside each agent unless there is no
+cleaner router-level fix.
 
 ## Gotchas
 
 | Gotcha | Why it matters |
 | --- | --- |
-| Web mode only handles one tool call | Multi-step web answers need a loop change |
-| Web mode language is heuristic | Add examples to `detectResponseLanguage()` tests before changing it |
-| Web route trusts browser conversation only when Redis is empty | Clear Redis when testing client-side history fallback |
-| CRM mode throws on loop exhaustion | Route returns 500 if the model never emits final text |
-| Redis failures are swallowed | Local behavior may differ from production history/cache |
-| `allowedDomains` is stored but not fully enforced | Do not assume per-bot embed domain protection exists |
-| Knowledge routes lack owner auth | Fix before production multi-tenant use |
-| `db/crm_assistant_schema.sql` is not current live schema | Do not test `loanDb.ts` against it |
-| `GPS_JWT_PUBLIC_KEY` is optional | Without it, JWT signature validation is skipped |
-| `GPS_INDIA_API_URL` changes public web behavior | Offer matching and lead capture call the backend before local fallbacks |
-| Direct Gemini calls remain | Embeddings/docs can fail even if text LLM fallback works |
+| Web mode handles one tool call | Multi-step public answers need an agent-loop change |
+| CRM mode can loop up to 8 iterations | A missing final model answer can become a route error |
+| Redis failures are often swallowed | Local chat history may differ from production |
+| `GPS_JWT_PUBLIC_KEY` is optional | Without it, signature verification is skipped |
+| `GPS_INDIA_API_URL` changes web behavior | Offer matching and lead capture use backend first |
+| `DATABASE_URL` controls PostgreSQL paths | Without it, tools use fallbacks or return limited data |
+| Gemini is still used directly | Embeddings and document analysis need `GEMINI_API_KEY` |
+| `db/crm_assistant_schema.sql` is stale | Do not use it as the live schema reference |
 
-## Code Style In This Repo
+## Before Finishing A Change
 
-The useful local patterns:
-
-- Small helper modules in `src/lib`.
-- Agent tools return structured data, not prose.
-- The model formats final user-facing prose.
-- Routes own HTTP status codes.
-- Tools own data validation/scope.
-- Tests mock external services at module boundaries.
-
-Avoid adding framework around one implementation. A new helper is worth it only
-when two call sites actually share it or when it protects a security boundary.
-
-## Before You Finish A Change
-
-Run the smallest check that proves your change:
+Run the smallest check that proves the change:
 
 ```bash
 npm test
 ```
 
-For route or build-sensitive work:
+For route, dependency, or build-sensitive work:
 
 ```bash
 npm run build
 ```
 
-For UI work, start the dev server and manually exercise the route/page you
-changed.
+For UI changes, start the dev server and exercise the changed page manually.

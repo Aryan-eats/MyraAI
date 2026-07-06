@@ -1,210 +1,134 @@
 # Architecture
 
-## Runtime Layers
+## Runtime Shape
 
 ```text
-User or embedded site
-  -> React client component or widget iframe
-  -> Next.js route handler in src/app/api
-  -> one of:
-       - bot RAG flow in /api/chat
-       - role-specific agent loop in src/agents/*
-       - CRUD/ingestion route
-  -> shared src/lib adapter
-  -> storage or external service
+User
+  -> React UI
+  -> Next.js API route
+  -> assistant agent loop
+  -> tool function
+  -> database or external service
+  -> model formats final answer
 ```
 
-The code intentionally keeps most side effects outside prompts. Prompts decide
-which tool to call; TypeScript tools enforce actual data access, auth scope, and
-external API behavior.
+Most business rules are outside the prompt. Prompts describe behavior, but
+routes and tools enforce authentication, partner scope, consent, rate limits,
+and sensitive-data redaction.
 
-## Main Product Surfaces
+## Product Surfaces
 
-| Surface | User | Entry point | Backing flow |
+| Surface | User | Entry | Backend flow |
 | --- | --- | --- | --- |
-| Embedded bot | Visitor on customer site | `public/widget.js` iframe | `/api/chat` with `botId` |
-| Bot dashboard | Authenticated owner | `/dashboard`, `/dashboard/bots` | ScaleKit + MongoDB |
-| Web lending advisor | Public borrower | `/chat?mode=web`, `/api/chat/web` | Web agent tools |
-| Partner chatbot | GPS partner | `/chat?mode=partner`, `/api/chat/partner` | Read-only PostgreSQL tools |
-| Admin chatbot | GPS ops/admin | `/chat?mode=admin`, `/api/chat/admin` | Read-only platform tools |
-| CRM copilot | GPS partner | `/chat?mode=crm`, `/api/chat/crm` | Action-capable CRM tools |
+| Loan chatbot | Borrower | `/chat?mode=web` | `/api/chat/web` -> `src/agents/web` |
+| CRM assistant | Partner CRM user | `/chat?mode=crm` | `/api/chat/crm` -> `src/agents/crm` |
+| Partner assistant | Partner viewer | `/chat?mode=partner` | `/api/chat/partner` -> `src/agents/partner` |
+| Admin assistant | Admin/ops | `/chat?mode=admin` | `/api/chat/admin` -> `src/agents/admin` |
+| Embedded bot | External site visitor | `public/widget.js` iframe | `/api/chat` with `botId` |
+| Bot dashboard | Bot owner | `/dashboard` | ScaleKit + MongoDB |
 
-## Auth Model
+## Authentication
 
-### Dashboard and Bot Ownership
+### Public loan chatbot
 
-Dashboard pages use ScaleKit:
+`/api/chat/web` is public. It can answer loan questions and capture leads, but
+it must not read private CRM data or ask for Aadhaar, PAN, bank account numbers,
+or OTPs.
 
-```text
-/api/auth/login
-  -> ScaleKit authorization URL
-/api/auth/callback
-  -> ScaleKit token
-  -> cookies: access_token, myra_session
-getSession()
-  -> validate token
-  -> scalekit.user.getUser(sub)
-```
+### CRM and partner assistants
 
-`src/proxy.ts` protects `/dashboard/:path*` by redirecting missing sessions to
-`/login`.
-
-Bot CRUD routes call `getSession()` and scope bot queries by `ownerId`.
-
-### Partner and Admin Chat
-
-Partner/admin chat uses a GPS token from either:
-
-- `Authorization: Bearer <token>`
-- `?gpsToken=<token>`
-
-`src/lib/chatAuth.ts` optionally validates JWT signature when
-`GPS_JWT_PUBLIC_KEY` is configured. It then resolves identity through
-`GPS_INDIA_API_URL/api/auth/me`.
-
-`chatAuth.ts` accepts both the older flat `/me` response shape and the current
-GPS backend shape `{ data: { user } }`, deriving `userId`, role, name, tier, and
-partner/entity scope from either format.
-
-When `DATABASE_URL` exists:
-
-- Partner auth resolves `partner_org_id` via `resolvePartnerOrgForUser()` in `crmDb.ts`.
-- Admin auth checks `users.role` via `getUser()` in `adminDb.ts`.
-
-When PostgreSQL is not configured, partner/admin fallback trusts the GPS `/me`
-role and entity.
-
-## LLM Layer
-
-Most code imports from `src/lib/gemini.ts`, but that file delegates generation
-to `src/lib/llm/router.ts`.
-
-Current default provider order:
+`/api/chat/crm` and `/api/chat/partner` require a GPS JWT:
 
 ```text
-gemini, openrouter
+Authorization: Bearer <gps-jwt>
 ```
 
-Override with:
+`src/lib/chatAuth.ts`:
+
+1. Optionally verifies JWT signature when `GPS_JWT_PUBLIC_KEY` is configured.
+2. Calls `GPS_INDIA_API_URL/api/auth/me`.
+3. Normalizes the GPS user payload.
+4. Resolves partner organization scope when PostgreSQL is configured.
+
+Partner-scoped tools must filter by `partner_org_id`.
+
+### Admin assistant
+
+`/api/chat/admin` also uses GPS JWT auth. Admin tools are read-only but can view
+platform-wide data after admin-role validation.
+
+### Dashboard
+
+`/dashboard` uses ScaleKit session cookies through `src/lib/getSession.ts` and
+`src/proxy.ts`. This is separate from GPS JWT auth.
+
+## LLM Provider Layer
+
+Most generation goes through:
+
+- `src/lib/gemini.ts`
+- `src/lib/llm/router.ts`
+
+Default provider order:
 
 ```env
-LLM_PROVIDER_ORDER=gemini,openrouter,openai,claude
+LLM_PROVIDER_ORDER=gemini,openrouter
 ```
 
-Provider defaults in code:
+The router can also use OpenAI and Claude when configured. It normalizes all
+provider responses into a Gemini-like shape so each agent loop can inspect text
+and function calls the same way.
 
-| Provider | Default model/env |
-| --- | --- |
-| Gemini | `GEMINI_MODEL` or `gemini-2.5-flash` |
-| OpenRouter | `OPENROUTER_DEFAULT_MODEL` or `OPENROUTER_FREE_MODEL` or `meta-llama/llama-3.3-70b-instruct:free` |
-| OpenAI | `OPENAI_MODEL` or `gpt-4o-mini` |
-| Claude | `CLAUDE_MODEL` or `claude-3-7-sonnet-latest` |
+Direct Gemini calls still exist for:
 
-The router normalizes Gemini, OpenAI/OpenRouter, and Claude responses into one
-Gemini-like shape:
-
-```ts
-{
-  text?: string
-  candidates: [{ content: { parts: [{ text? }, { functionCall? }] } }]
-}
-```
-
-That lets all agent loops inspect only `parts`, `text`, and `functionCall`.
-
-Provider failures are logged with `[llm-router] provider_failed`; if every
-enabled provider fails, the router logs `[llm-router] all_providers_failed`
-before throwing.
+- Embeddings: `src/lib/embeddings.ts`
+- Document analysis: `src/lib/documentAnalyser.ts`
 
 ## State
 
-| Store | Used for | Code |
-| --- | --- | --- |
-| MongoDB | Bots, bot knowledge, widget sessions, settings, lending fallback, briefings | `src/model/*`, `src/lib/db.ts` |
-| Redis | First-party chat history, cache, WhatsApp rate counters | `src/lib/gemini.ts`, `src/lib/chatCache.ts` |
-| PostgreSQL | Live GPS banks, docs, leads, partners, users | `src/lib/pgClient.ts`, `loanDb.ts`, `crmDb.ts`, `adminDb.ts` |
-| GPS API | CRM bridge calls, auth identity, public offer matching, public lead creation | `src/lib/gpsBridge.ts`, `chatAuth.ts`, web tools |
-| Meta WhatsApp | Template sends | `src/lib/whatsapp.ts` |
+| Store | Used for |
+| --- | --- |
+| MongoDB | Bot configs, widget sessions, bot knowledge, lending fallback, briefings |
+| Redis | First-party chat history, short-lived cache, WhatsApp rate counters |
+| PostgreSQL | Live GPS loan, lead, partner, user, commission-style data |
+| GPS backend API | Auth identity, offer matching, lead creation, CRM bridge calls |
 
-## Data Flow Patterns
+Redis outages usually degrade history/cache behavior instead of stopping local
+development. MongoDB and LLM provider keys are required for many flows.
 
-### Embedded Bot RAG
-
-```text
-widget.js
-  -> /embed?botId=...
-  -> EmbedChat
-  -> POST /api/chat { botId, message, sessionId }
-  -> Bot lookup in Mongo
-  -> retrieveRelevantChunks(botId, message)
-  -> generateText()
-  -> append ChatSession messages in Mongo
-```
-
-### First-Party Agent Chat
+## First-Party Chat Flow
 
 ```text
 ChatClient
   -> POST /api/chat/<mode>
-  -> load Redis history conv:<sessionId>
-  -> web mode may fall back to browser-provided conversation if Redis is empty
-  -> run<Mode>Agent(message, history, auth?)
-  -> generateWithTools()
-  -> execute tool calls
-  -> save Redis history
+  -> route validates/authenticates
+  -> route loads Redis history
+  -> run<Mode>Agent()
+  -> model may request a tool
+  -> TypeScript executes the tool
+  -> model writes final answer
+  -> route saves history
 ```
 
-For public web chat, `ChatClient` sends the visible browser conversation with
-each request. `/api/chat/web` still prefers Redis history when available, but
-uses that client conversation to preserve context when the server has no saved
-history.
-
-### Knowledge Ingestion
-
-```text
-POST /api/knowledge/upload or /api/knowledge/text
-  -> create KnowledgeSource(status=pending)
-  -> fire ingestSource(sourceId) without await
-  -> route returns 202
-
-ingestSource()
-  -> status=processing
-  -> parse/chunk text
-  -> embed chunks with Gemini
-  -> replace KnowledgeChunk rows
-  -> status=ready or failed
-```
+CRM mode can run multiple tool calls in a loop. Web mode is intentionally
+simpler and handles one tool call before producing the final answer.
 
 ## Security Boundaries
 
-These are the boundaries the code tries to enforce:
+Keep these rules intact:
 
-- Partner queries must always filter by `partner_org_id`.
-- Admin queries can see platform-wide data only after admin-role auth.
-- CRM action tools receive `AuthenticatedPartner` and call scoped bridge helpers.
-- Document analysis redacts Aadhaar/PAN/account-like fields before returning structured data.
-- WhatsApp sends check rate limits and consent before the Meta API path.
+- Public web chat has no CRM access.
+- Partner tools must enforce partner organization scope in code.
+- Admin tools stay behind admin auth.
+- WhatsApp sends must check consent and rate limits.
+- Document analysis must redact sensitive IDs before returning data to the model.
+- Prompt text is not a security boundary.
 
-Known issues to keep in mind:
+Known hardening items:
 
-- Knowledge routes currently accept `botId` without verifying the owner session.
-- `/api/settings` trusts `ownerId` from the request rather than deriving it from session.
-- `Bot.allowedDomains` is stored but not the main enforcement point for `/api/chat`; global `CHAT_ALLOWED_ORIGINS` is used there.
-- `docker-compose.yml` sets `POSTGRES_URL`, but current PostgreSQL code reads `DATABASE_URL`.
-- `db/crm_assistant_schema.sql` does not match the live-schema tables used by `loanDb.ts`, `crmDb.ts`, and `adminDb.ts`.
-
-## Where Complexity Lives
-
-Most changes become simple if you pick the right layer:
-
-| Change | Start here |
-| --- | --- |
-| Prompt wording or safety behavior | `src/agents/*/persona.ts` |
-| Add tool to an agent | `src/agents/<mode>/agent.ts` plus `tools/*` |
-| Change provider fallback | `src/lib/llm/router.ts` |
-| Change public bot answers | `/api/chat` bot flow and retrieval |
-| Change lender/product data behavior | `src/agents/web/tools/compareProducts.ts`, `src/lib/loanDb.ts`, `src/lib/knowledgeBase.ts` |
-| Change web chat language behavior | `src/agents/web/agent.ts`, `src/agents/web/persona.ts` |
-| Change partner data visibility | `src/lib/crmDb.ts`, `src/lib/chatAuth.ts` |
-| Change admin data visibility | `src/lib/adminDb.ts`, `src/lib/chatAuth.ts` |
-| Change widget UI | `public/widget.js`, `src/components/Chat/EmbedChat.tsx` |
+- Some older dashboard knowledge routes should verify bot ownership more
+  strictly before production multi-tenant use.
+- `Bot.allowedDomains` exists, but global `CHAT_ALLOWED_ORIGINS` is still the
+  main legacy chat CORS gate.
+- `docker-compose.yml` and the checked-in SQL schema do not fully match the live
+  PostgreSQL schema expected by the app.

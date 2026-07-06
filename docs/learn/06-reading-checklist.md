@@ -1,153 +1,150 @@
 # Reading Checklist
 
-Use this as a hands-on onboarding plan. Do not just read files; run one small
-experiment per section.
+Use this as a practical onboarding plan. The goal is to understand the product,
+then the code paths, then the failure modes.
 
-## Day 1: Find The Entry Points
+## Day 1: Understand The Product
 
 Read:
 
-- `src/app/page.tsx`
+- `README.md`
+- `docs/learn/README.md`
 - `src/app/chat/page.tsx`
 - `src/components/ChatClient.tsx`
-- `src/components/Chat/EmbedChat.tsx`
-- `public/widget.js`
 
-Verify:
+You should be able to answer:
 
-- Explain how `/chat?mode=partner` becomes a POST to `/api/chat/partner`.
-- Explain why embedded widget messages go to `/api/chat`, not `/api/chat/web`.
-- Find where the pasted GPS JWT is sent.
+- Who uses `web`, `crm`, `partner`, and `admin` modes?
+- Which modes require a GPS JWT?
+- Which mode can perform CRM actions?
+- Which mode is public?
 
-Small experiment:
+Small check:
 
 ```bash
-npm test -- src/tests/middleware.test.ts
+npm test -- src/tests/chat-client.test.ts
 ```
 
-## Day 2: Understand The Agents
+## Day 2: Follow The Public Loan Chatbot
 
 Read:
 
+- `src/app/api/chat/web/route.ts`
 - `src/agents/web/agent.ts`
 - `src/agents/web/persona.ts`
-- `src/agents/partner/agent.ts`
-- `src/agents/admin/agent.ts`
+- `src/agents/web/tools/compareProducts.ts`
+- `src/agents/web/tools/captureLead.ts`
+- `src/agents/web/tools/checkEligibility.ts`
+
+You should be able to answer:
+
+- How does the chatbot decide which language to use?
+- Which tool calculates EMI?
+- Which tool captures a lead?
+- What data source order does product comparison use?
+- Why must the public chatbot avoid Aadhaar, PAN, bank account numbers, and OTPs?
+
+Small check:
+
+```bash
+npm test -- src/tests/web-agent.test.ts src/tests/compare-products.test.ts src/tests/capture-lead.test.ts
+```
+
+## Day 3: Follow The CRM Assistant
+
+Read:
+
+- `src/app/api/chat/crm/route.ts`
 - `src/agents/crm/agent.ts`
 - `src/agents/crm/persona.ts`
+- `src/agents/crm/tools/sendWhatsapp.ts`
+- `src/agents/crm/tools/runSoftCheck.ts`
+- `src/agents/crm/tools/analyseDocument.ts`
+- `src/lib/gpsBridge.ts`
+- `src/lib/whatsapp.ts`
 
-Verify:
+You should be able to answer:
 
-- Name which modes are read-only.
-- Name which mode can send WhatsApp.
-- Explain why web mode cannot currently call two tools in one request.
-- Explain why CRM mode can execute multiple tool calls per model turn.
-- Explain how web mode decides between Hindi, Hinglish, and English.
-- Explain why the current user message overrides earlier chat language.
+- How does partner authentication reach the agent?
+- Which CRM tools have side effects?
+- Where is WhatsApp consent checked?
+- Where is document redaction handled?
+- What happens if the model never returns a final text answer?
 
-Small experiment:
+Small check:
 
 ```bash
-npm test -- src/tests/web-agent.test.ts src/tests/web-chat-route.test.ts src/tests/partner-chatbot.test.ts src/tests/admin-chatbot.test.ts
+npm test -- src/tests/crm-agent.test.ts src/tests/send-whatsapp-message.test.ts src/tests/analyse-document.test.ts
 ```
 
-## Day 3: Follow Storage
+## Day 4: Follow Auth And Data Scope
 
 Read:
 
-- `src/lib/db.ts`
-- `src/model/Bot.ts`
-- `src/model/KnowledgeSource.ts`
-- `src/model/KnowledgeChunk.ts`
-- `src/model/ChatSession.ts`
-- `src/lib/gemini.ts`
-- `src/lib/chatCache.ts`
-
-Verify:
-
-- Explain which chat history goes to MongoDB and which goes to Redis.
-- Explain how a knowledge source becomes searchable chunks.
-- Explain what happens when Redis is unavailable.
-
-Small experiment:
-
-```bash
-npm test -- src/tests/chunk-text.test.ts src/tests/retrieve-relevant-chunks.test.ts
-```
-
-## Day 4: Follow Live GPS Data
-
-Read:
-
-- `src/lib/pgClient.ts`
-- `src/lib/loanDb.ts`
+- `src/lib/chatAuth.ts`
 - `src/lib/crmDb.ts`
 - `src/lib/adminDb.ts`
-- `src/lib/chatAuth.ts`
+- `src/lib/loanDb.ts`
+- `src/app/api/chat/partner/route.ts`
+- `src/app/api/chat/admin/route.ts`
 
-Verify:
+You should be able to answer:
 
-- Find every place partner scope is resolved or enforced.
-- Explain how `/api/auth/me` is normalized in `chatAuth.ts`.
-- Explain why admin queries do not filter by partner.
-- Explain why `db/crm_assistant_schema.sql` is not enough for current Postgres helpers.
+- How is `/api/auth/me` normalized?
+- Where is partner organization scope resolved?
+- Why are admin queries not partner-scoped?
+- What happens when `DATABASE_URL` is missing?
 
-Small experiment:
+Small check:
 
 ```bash
-npm test -- src/tests/loanDb.test.ts src/tests/crmDb.test.ts src/tests/adminDb.test.ts src/tests/chat-auth.test.ts
+npm test -- src/tests/chat-auth.test.ts src/tests/crmDb.test.ts src/tests/adminDb.test.ts src/tests/loanDb.test.ts
 ```
 
-## Day 5: Follow External Services
+## Day 5: Follow Providers And Storage
 
 Read:
 
 - `src/lib/llm/router.ts`
+- `src/lib/gemini.ts`
+- `src/lib/db.ts`
+- `src/lib/chatCache.ts`
 - `src/lib/embeddings.ts`
 - `src/lib/documentAnalyser.ts`
-- `src/lib/gpsBridge.ts`
-- `src/lib/whatsapp.ts`
-- `src/lib/briefingGenerator.ts`
 
-Verify:
+You should be able to answer:
 
-- Explain default LLM provider order.
-- Explain why `GEMINI_API_KEY` is still needed even if OpenRouter works.
-- Explain what the LLM router logs when a provider fails.
-- Explain when web offer comparison uses GPS backend, PostgreSQL, or MongoDB.
-- Explain when web lead capture uses GPS backend, webhook, or local stub.
-- Explain WhatsApp block/stub/send paths.
-- Explain what credentials are needed for morning briefings.
+- What is the default LLM provider order?
+- Why can Gemini still be required when OpenRouter is configured?
+- Which chat history uses Redis?
+- Which embedded bot data uses MongoDB?
+- What does the router log when providers fail?
 
-Small experiment:
+Small check:
 
 ```bash
-npm test -- src/tests/llm-router.test.ts src/tests/compare-products.test.ts src/tests/capture-lead.test.ts src/tests/analyse-document.test.ts src/tests/send-whatsapp-message.test.ts
+npm test -- src/tests/llm-router.test.ts src/tests/chat-rag.test.ts src/tests/retrieve-relevant-chunks.test.ts
 ```
 
 ## Day 6: Make One Tiny Safe Change
 
 Pick one:
 
-- Add a new starter prompt in `ChatClient`.
-- Add a new alias in `loanTypes.ts`.
 - Improve one fallback message in a persona.
+- Add one loan-type alias in `src/lib/loanTypes.ts`.
 - Add one assertion to an existing test.
+- Add one CRM starter prompt in `src/components/ChatClient.tsx`.
 
-Then run the smallest related test. If no test exists, add one small test.
+Then run the smallest related test.
 
-## Questions You Should Be Able To Answer
+## Final Self-Test
 
-- What is the difference between `/api/chat/web` and `/api/chat` with `botId`?
-- Which code path uses `KnowledgeChunk`?
-- Which code path uses `lending_products`?
-- Which code path uses `banks` and `lender_doc_requirements`?
-- Which code path uses `/api/leads/match-offers`?
-- Which code path uses `/api/leads`?
-- What breaks if Redis is down?
-- What breaks if MongoDB is down?
-- What breaks if `DATABASE_URL` is missing?
-- What changes when `GPS_INDIA_API_URL` is configured?
-- What happens if `GPS_JWT_PUBLIC_KEY` is missing?
-- Which routes should be hardened before production multi-tenant use?
-- Where would you add a new CRM write action, and where would you test it?
+Before calling yourself onboarded, explain these without opening the docs:
+
+- Difference between `/api/chat/web` and `/api/chat` with `botId`.
+- Difference between `crm` and `partner` modes.
+- Where partner scope is enforced.
+- Where WhatsApp can be stubbed or sent.
+- Where product comparison gets data from.
+- Which env vars are needed for a basic local run.
+- Which files you would edit to add a new CRM action.

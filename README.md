@@ -1,67 +1,66 @@
-# Myra AI - GPS India (Dual-Agent System)
+# Myra AI - Loan Chatbot and CRM Assistant
 
-Myra AI is a production-grade dual-agent platform for GPS India Financial Services (loan origination + DSA partner management).
+Myra AI is an AI assistant platform for lending teams. It has two focused assistants:
 
-It contains two distinct agents with separate auth boundaries, personas, and tool ecosystems:
+- `myra-web`: customer-facing loan chatbot for product questions, eligibility guidance, and lead capture
+- `myra-crm`: authenticated CRM assistant for partner operations, pipeline work, documents, WhatsApp outreach, and daily briefings
 
-- `myra-web`: public website lending advisor (unauthenticated, no applicant-data access)
-- `myra-crm`: partner CRM operations copilot (strict partner JWT required)
+## What it does
 
-## What this repo includes
+- Answers loan product, rate, document, process, and eligibility questions
+- Gives indicative FOIR-based loan eligibility guidance
+- Captures qualified borrower leads from chat
+- Helps CRM users review applications, documents, pipeline status, commissions, and partner notes
+- Sends WhatsApp outreach with consent and rate-limit checks
+- Generates morning briefings for partner follow-ups
+- Uses MongoDB for lending knowledge and CRM brief storage
+- Uses Redis for caching and conversation memory
 
-- Next.js App Router backend + UI shell
-- OpenRouter free-model response generation by default, with Gemini/OpenAI/Claude fallback
-- Gemini 2.0 Flash integration for chat + tool use + multimodal document analysis
-- MongoDB lending knowledge base (`lending_products`) and partner brief storage
-- Redis caching + conversation memory
-- GPS backend bridge layer with partner-scope enforcement
-- WhatsApp integration wrapper (Meta direct API, feature-flagged)
-- Soft-check engine (five-layer eligibility logic)
-- Morning briefing generator + cron webhook
-- Unit tests with Vitest
+## Assistants
 
-## Architecture
-
-### Agent 1: `myra-web`
+### Customer Loan Chatbot
 
 Path: `src/agents/web`
 
-- Handles public loan product/rate/document/process questions
-- Uses knowledge and comparison tools
-- Provides FOIR-based indicative eligibility only
-- Captures leads naturally when intent is clear
-- Never asks for Aadhaar/PAN/account/OTP
-- No write access to CRM/partner pipeline
+Endpoint:
 
-API endpoint:
-- `POST /api/chat/web`
+```http
+POST /api/chat/web
+```
 
-### Agent 2: `myra-crm`
+The chatbot is public-facing and unauthenticated. It can explain loan options, compare products, estimate eligibility, and collect lead details when the user shows intent.
+
+It does not access private applicant data, CRM records, Aadhaar, PAN, bank account details, or OTPs.
+
+### CRM Assistant
 
 Path: `src/agents/crm`
 
-- Multi-step tool-calling agent loop (max 8 iterations)
-- Supports:
-  - WhatsApp outreach
-  - Document analysis + checklist gaps
-  - Soft-check execution
-  - Pipeline and commission queries
-  - Partner notes
-  - Morning briefing generation
+Endpoint:
 
-API endpoint:
-- `POST /api/chat/crm` (requires valid partner JWT)
+```http
+POST /api/chat/crm
+```
 
-## Key API routes
+The CRM assistant requires a valid partner JWT. It can use tools for:
+
+- WhatsApp outreach
+- Document analysis and checklist gaps
+- Soft-check eligibility
+- Pipeline and commission queries
+- Partner notes
+- Morning briefing generation
+
+## API routes
 
 - `POST /api/chat/web`
 - `POST /api/chat/crm`
-- `POST /api/webhooks/briefing-cron` (requires `x-briefing-secret`)
-- `GET /api/partner/briefing/today` (partner JWT required)
+- `POST /api/webhooks/briefing-cron`
+- `GET /api/partner/briefing/today`
 
 ## Environment variables
 
-Create a local `.env` from `.env.example` and keep real secrets out of version control:
+Create `.env` from `.env.example` and keep real secrets out of version control.
 
 ```env
 MONGODB_URI=mongodb+srv://username:password@cluster.example.mongodb.net/agent
@@ -80,10 +79,11 @@ CHAT_RATE_LIMIT_WINDOW_MS=60000
 ```
 
 Notes:
-- `.env` is ignored and should remain local-only.
-- `.env.example` is placeholder-only and safe to commit.
-- Gemini is first by default, with OpenRouter as the fallback. Set `LLM_PROVIDER_ORDER` only when you need a different fallback order.
-- The previously exposed provider/database keys must still be rotated manually outside the repo.
+
+- `.env` is ignored and should stay local.
+- `.env.example` contains placeholders only.
+- Gemini is first by default, with OpenRouter as fallback.
+- Rotate any real provider or database keys that were ever exposed.
 
 ## Install and run
 
@@ -98,54 +98,57 @@ npm run dev
 npm test
 ```
 
-Current unit tests cover:
+Current tests cover:
+
 - CRM agent loop behavior
 - Soft-check logic
-- WhatsApp consent/rate-limit behavior
+- WhatsApp consent and rate limiting
 - Chat auth
-- Document analysis redaction/checklist
+- Document analysis redaction and checklist handling
 - Web eligibility and product comparison tools
 
-## Data seeding
+## Seed lending knowledge
 
-Seed lending products into MongoDB using your TypeScript runner:
+Review the seed file first:
+
+- `KNOWLEDGE_BASE_SEED.md`
+
+Then seed products into MongoDB:
 
 ```bash
 npx tsx src/jobs/seedKnowledge.ts
 ```
 
-Review seed data before importing:
-- `KNOWLEDGE_BASE_SEED.md`
+## Morning briefing
 
-## Briefing job
+Call this route from a scheduler:
 
-Call `POST /api/webhooks/briefing-cron` from your platform scheduler.
-It executes only if `ENABLE_MORNING_BRIEF=true`.
+```http
+POST /api/webhooks/briefing-cron
+```
+
+The job runs only when `ENABLE_MORNING_BRIEF=true` and the request includes the correct `x-briefing-secret` header.
 
 ## Security model
 
-- CRM endpoint rejects unauthenticated requests
-- Partner scope enforced in `gpsBridge` (not only at prompt layer)
-- WhatsApp send path checks consent + per-partner rate limits
-- Document analysis stores only redacted structured fields (no raw documents)
-- Cron webhook validates secret header before running
-
-## Additional docs
-
-- `PLAN.md`: build scope, backend dependencies, rollout checklist, test order
-- `KNOWLEDGE_BASE_SEED.md`: lender/product seed review sheet
+- Public chatbot has no CRM or private applicant-data access
+- CRM endpoint requires partner authentication
+- Partner scope is enforced in backend tools, not only in prompts
+- WhatsApp sending checks consent and rate limits
+- Document analysis stores redacted structured fields only
+- Cron webhook validates a shared secret before running
 
 ## Tech stack
 
-- Next.js (App Router) + TypeScript
-- Node.js
-- MongoDB + Mongoose
-- Redis + ioredis
-- Gemini (`@google/genai`, `gemini-2.5-flash`)
-- OpenRouter Chat Completions
-- OpenAI Chat Completions fallback
-- Anthropic Claude Messages API
-- Vitest (unit tests)
+- Next.js App Router
+- TypeScript
+- MongoDB and Mongoose
+- Redis and ioredis
+- Gemini
+- OpenRouter
+- OpenAI fallback
+- Anthropic Claude fallback
+- Vitest
 
 ## License
 

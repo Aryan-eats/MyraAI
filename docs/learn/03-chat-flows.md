@@ -1,12 +1,6 @@
 # Chat Flows
 
-This app has five meaningful chat paths:
-
-1. `/api/chat/web`: public GPS web lending advisor.
-2. `/api/chat/partner`: authenticated read-only partner chatbot.
-3. `/api/chat/admin`: authenticated read-only admin chatbot.
-4. `/api/chat/crm`: authenticated action-capable partner CRM copilot.
-5. `/api/chat`: embedded bot RAG flow, plus a legacy non-`botId` flow.
+The project has four main assistant APIs plus one older embedded bot route.
 
 ## UI Routing
 
@@ -19,20 +13,16 @@ This app has five meaningful chat paths:
 /chat?mode=admin
 ```
 
-It renders `src/components/ChatClient.tsx`, whose `MODE_CONFIG` maps modes to
-endpoints:
+`src/components/ChatClient.tsx` maps each mode to an endpoint:
 
-| Mode | Endpoint | Token input |
+| Mode | Endpoint | Auth |
 | --- | --- | --- |
-| `web` | `/api/chat/web` | No |
-| `crm` | `/api/chat/crm` | Yes |
-| `partner` | `/api/chat/partner` | Yes |
-| `admin` | `/api/chat/admin` | Yes |
+| `web` | `/api/chat/web` | None |
+| `crm` | `/api/chat/crm` | GPS JWT |
+| `partner` | `/api/chat/partner` | GPS JWT |
+| `admin` | `/api/chat/admin` | GPS JWT |
 
-For token modes, the UI lets a developer paste a GPS JWT. That token is sent as
-`Authorization: Bearer <token>`.
-
-## Web Lending Advisor
+## Public Loan Chatbot
 
 Files:
 
@@ -41,55 +31,85 @@ Files:
 - `src/agents/web/persona.ts`
 - `src/agents/web/tools/*`
 
+Request shape:
+
+```json
+{
+  "message": "I need a home loan",
+  "sessionId": "optional-session-id",
+  "conversation": []
+}
+```
+
 Flow:
 
 ```text
-POST /api/chat/web { message, sessionId?, endSession?, conversation? }
-  -> reject if no configured LLM provider
-  -> sessionId from body, x-session-id, or random UUID
+POST /api/chat/web
   -> load Redis history
-  -> if Redis history is empty, convert browser conversation to Gemini history
-  -> runWebAgent(message, history)
-  -> save user/model turns to Redis
-  -> optionally summarize and close
-  -> return { sessionId, answer, toolsUsed, leadCaptured }
+  -> use browser conversation only if Redis has no history
+  -> runWebAgent()
+  -> execute first requested tool, if any
+  -> ask model for final answer
+  -> save history
+  -> return answer, sessionId, toolsUsed, leadCaptured
 ```
 
 Tools:
 
-| Tool name | Implementation | Purpose |
-| --- | --- | --- |
-| `search_knowledge` | `searchKnowledge.ts` | Bank/product rates, fees, TAT, supported loan types |
-| `compare_products` | `compareProducts.ts` | Compare banks for one loan type, backend-first when configured |
-| `get_documents` | `getDocuments.ts` | Official bank and loan document checklist |
-| `calculate_emi` | `calculateEmi.ts` | Pure EMI math |
-| `check_eligibility` | `checkEligibility.ts` | FOIR-based indicative eligibility |
-| `capture_lead` | `captureLead.ts` | Create GPS backend lead, or use webhook/local stub fallback |
+| Tool | Purpose |
+| --- | --- |
+| `search_knowledge` | Find product/rate/process answers |
+| `compare_products` | Compare lenders and offers |
+| `get_documents` | Return document checklist |
+| `calculate_emi` | Calculate EMI |
+| `check_eligibility` | Estimate FOIR-based eligibility |
+| `capture_lead` | Create or forward a borrower lead |
 
 Important behavior:
 
-- Web mode is a two-pass, single-tool flow.
-- It executes only the first tool call returned by the first model response.
-- It catches model/tool failures, logs the failed stage, and returns a helpful fallback.
-- If final model formatting fails after `compare_products` or `get_documents`, it can summarize the tool result instead of returning a generic fallback.
-- It adds a `Preferred response language` hint on each model call. The current message wins: Devanagari Hindi -> Hindi, Roman Hindi -> Hinglish, English -> English.
-- It should never ask for Aadhaar, PAN, bank account numbers, or OTPs.
+- Current-message language wins: Hindi, Hinglish, or English.
+- It should not ask for Aadhaar, PAN, bank account numbers, or OTPs.
+- `compare_products` tries GPS backend offers first, then PostgreSQL, then
+  MongoDB lending fallback data.
+- `capture_lead` tries GPS backend lead creation first when enough fields exist.
 
-Data source:
+## CRM Assistant
 
-- `compare_products` first tries `GPS_INDIA_API_URL/api/leads/match-offers`.
-- If the backend is unavailable or returns no offers, product/document tools use PostgreSQL when `DATABASE_URL` is set.
-- If PostgreSQL is absent, product search/comparison falls back to MongoDB
-  `lending_products`.
-- `capture_lead` posts to `GPS_INDIA_API_URL/api/leads` when configured and when `loanType` and `loanAmount` are available; otherwise it falls back to `GPS_INDIA_WEBHOOK_URL` or a local captured result.
+Files:
 
-UI behavior:
+- `src/app/api/chat/crm/route.ts`
+- `src/agents/crm/agent.ts`
+- `src/agents/crm/persona.ts`
+- `src/agents/crm/tools/*`
 
-- `ChatClient` sends the browser `conversation` array for both web and CRM payloads.
-- Web chat bubbles and input use `dir="auto"` so Hindi, Hinglish, and English render in the expected direction.
-- The web input placeholder is bilingual: `Ask about loans... / लोन के बारे में पूछें`.
+Flow:
 
-## Partner Chatbot
+```text
+POST /api/chat/crm
+  -> require partner auth
+  -> load Redis history
+  -> runCrmAgent()
+  -> model can call tools for up to 8 iterations
+  -> save history
+  -> return answer, toolsUsed, iterations
+```
+
+CRM tools:
+
+| Tool | Side effect |
+| --- | --- |
+| `query_pipeline` | No, reads scoped pipeline data |
+| `get_commissions` | No, reads scoped commission data |
+| `send_whatsapp` | Yes, sends or stubs WhatsApp and logs status |
+| `analyse_document` | Yes, analyzes and logs redacted document output |
+| `run_soft_check` | Yes, evaluates lead and appends note |
+| `generate_briefing` | Yes, stores briefing |
+| `add_partner_note` | Yes, writes partner note |
+
+CRM is the main action-capable assistant. Keep validation, scope checks, and
+side-effect rules in TypeScript, not only in the persona.
+
+## Partner Assistant
 
 Files:
 
@@ -98,188 +118,68 @@ Files:
 - `src/agents/partner/persona.ts`
 - `src/agents/partner/tools/*`
 
-Flow:
+This is read-only. It answers partner questions about:
 
-```text
-POST /api/chat/partner { message, sessionId? }
-  -> requirePartnerAuth(req)
-  -> reject if no configured LLM provider
-  -> load Redis history
-  -> runPartnerChatbot(message, history, partner)
-  -> save user/model turns to Redis
-  -> return { sessionId, answer, toolsUsed }
-```
+- Pipeline overview
+- Lead status
+- Missing documents
+- Commission overview
+- Stalled leads
 
-Tools:
+It should refuse actions like sending WhatsApp or changing lead status.
 
-| Tool name | Purpose |
-| --- | --- |
-| `get_pipeline_overview` | Partner pipeline counts, status breakdown, commissions, disbursal total |
-| `get_lead_status` | Resolve lead by name or list by status |
-| `get_missing_docs_list` | Leads in document trouble |
-| `get_commission_overview` | Current-month pending/processing/paid commission totals |
-| `get_stalled_leads` | Non-terminal leads with no recent activity |
-
-Important behavior:
-
-- Read-only by design.
-- Persona explicitly refuses actions such as sending WhatsApp or changing status.
-- Tool errors are caught and returned to the model as `{ error }`.
-- If the loop fails, it returns a fallback instead of throwing.
-
-## Admin Chatbot
+## Admin Assistant
 
 Files:
 
 - `src/app/api/chat/admin/route.ts`
 - `src/agents/admin/agent.ts`
 - `src/agents/admin/persona.ts`
-- `src/agents/admin/tools/*`
 - `src/lib/adminDb.ts`
 
-Flow:
+This is read-only platform analytics. It can answer:
 
-```text
-POST /api/chat/admin { message, sessionId? }
-  -> requireAdminAuth(req)
-  -> reject if no configured LLM provider
-  -> load Redis history
-  -> runAdminChatbot(message, history, admin)
-  -> save user/model turns to Redis
-  -> return { sessionId, answer, toolsUsed }
-```
+- Platform overview
+- Partner performance
+- Bank statistics
+- Leads by status
 
-Tools:
+Admin visibility is wider than partner visibility, so auth must stay in the
+route and data helpers.
 
-| Tool name | Purpose |
-| --- | --- |
-| `get_platform_overview` | Total leads, active leads, disbursals, total disbursed, active partners |
-| `get_partner_performance` | Partner leaderboard or filtered partner stats |
-| `get_bank_stats` | Bank-wise lead volume and approval rate |
-| `get_leads_by_status` | Platform leads by status with partner names |
-
-Important behavior:
-
-- Platform-wide visibility.
-- Read-only by persona and by exposed tools.
-- Requires user role in `super_admin`, `admin`, `manager`, or `agent` when PostgreSQL auth is active.
-
-## CRM Copilot
-
-Files:
-
-- `src/app/api/chat/crm/route.ts`
-- `src/agents/crm/agent.ts`
-- `src/agents/crm/persona.ts`
-- `src/agents/crm/tools/*`
-- `src/lib/gpsBridge.ts`
-- `src/lib/whatsapp.ts`
-- `src/lib/softCheckEngine.ts`
-- `src/lib/documentAnalyser.ts`
-
-Flow:
-
-```text
-POST /api/chat/crm { message, sessionId?, endSession? }
-  -> requirePartnerAuth(req)
-  -> load Redis history
-  -> runCrmAgent(message, history, auth)
-  -> save user/model turns to Redis
-  -> optionally summarize and close
-  -> return { sessionId, answer, toolsUsed, iterations }
-```
-
-Tools:
-
-| Tool name | Side effects |
-| --- | --- |
-| `send_whatsapp` | Yes, may send or stub WhatsApp and append partner note |
-| `analyse_document` | Yes, analyzes file and logs analysis through GPS bridge |
-| `run_soft_check` | Yes, fetches lead, evaluates, appends partner note |
-| `generate_briefing` | Yes, generates and stores briefing |
-| `add_partner_note` | Yes, appends note through GPS bridge |
-| `query_pipeline` | Read path, may use cache |
-| `get_commissions` | Read path, may use cache |
-
-Important behavior:
-
-- Multi-tool loop, up to 8 iterations.
-- Executes all tool calls from one model response in parallel.
-- Throws `AgentLoopError` if no terminal text response arrives.
-- This is the only current mode intended to perform CRM actions.
-
-## Embedded Bot RAG
+## Embedded Bot Route
 
 Files:
 
 - `public/widget.js`
 - `src/app/embed/page.tsx`
 - `src/components/Chat/EmbedChat.tsx`
-- `src/app/api/bots/[botId]/public/route.ts`
 - `src/app/api/chat/route.ts`
 - `src/lib/retrieval.ts`
 
 Flow:
 
 ```text
-script tag with data-bot-id
-  -> public/widget.js injects iframe /embed?botId=...
-  -> EmbedChat fetches /api/bots/<botId>/public
-  -> user message POST /api/chat { botId, message, sessionId }
-  -> runBotChatFlow()
-  -> load active Bot
-  -> create/load ChatSession in Mongo
-  -> retrieveRelevantChunks(botId, message)
-  -> generateText with bot prompt + knowledge + recent history
-  -> append messages to ChatSession
-  -> return { reply, answer, sessionId }
+External site script
+  -> iframe /embed?botId=...
+  -> POST /api/chat { botId, message, sessionId }
+  -> load Bot and ChatSession from MongoDB
+  -> retrieve KnowledgeChunk rows
+  -> generate answer from retrieved bot knowledge
+  -> append ChatSession messages
 ```
 
-This path is stricter than `/api/chat/web`: it tells the model to answer only
-from retrieved bot knowledge and use the bot fallback if the answer is missing.
+This path is separate from `/api/chat/web`. It is for custom embedded bots, not
+the first-party loan chatbot.
 
-## Legacy `/api/chat` Without `botId`
-
-The same route has another path when no `botId` is supplied.
-
-Flow:
-
-```text
-POST /api/chat { message, ownerId?, conversation? }
-  -> CORS check from CHAT_ALLOWED_ORIGINS
-  -> getChatUser()
-  -> memory rate limit
-  -> cache check
-  -> rule classifier or model classifier
-  -> one of:
-       - FAQ response from knowledge_documents/settings
-       - GPS tool flow
-       - escalation
-```
-
-This flow is older than the dedicated `/api/chat/web|crm|partner|admin` routes.
-Read it if you are changing the embed bot path or legacy authenticated chat.
-
-## Adding Or Changing A Tool
-
-For a role-specific agent:
-
-1. Add or edit the concrete tool in `src/agents/<mode>/tools`.
-2. Add the tool declaration in `get<Mode>ToolDeclarations()` inside `agent.ts`.
-3. Add dispatch logic in `execute<Mode>Tool()` or switch equivalent.
-4. Update the persona if the model needs a new boundary or usage rule.
-5. Add a focused test in `src/tests`.
-
-Do not put authorization only in the prompt. Enforce it in the tool or route.
-
-## Debugging Bad Answers
+## Debugging A Bad Answer
 
 Use this order:
 
-1. Confirm which endpoint the UI called.
-2. Confirm auth resolved the expected partner/admin/user.
+1. Confirm which endpoint was called.
+2. Confirm auth resolved the expected user and partner scope.
 3. Confirm Redis history is not carrying stale context.
 4. Confirm the model requested the expected tool.
-5. Confirm the tool returned the data you expected.
+5. Confirm the tool returned the expected data.
 6. Confirm the persona tells the model how to use that data.
-7. Add or update the smallest test that would have caught the bad behavior.
+7. Add the smallest test that would catch the bug next time.
