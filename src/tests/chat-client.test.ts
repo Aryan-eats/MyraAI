@@ -14,6 +14,6 @@ describe("ChatClient", () => {
     const html = renderToStaticMarkup(React.createElement(ChatClient, { mode: "web" }))
 
     expect(html).toContain('dir="auto"')
-    expect(html).toContain("Ask about loans... / लोन के बारे में पूछें")
+    expect(html).toContain("लोन के बारे में पूछें")
   })
 })

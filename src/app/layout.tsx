@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Agent",
-  description: "Support agent for handling user queries",
+  title: "Myra AI — Lending Intelligence",
+  description: "Ask anything about loans, eligibility, EMIs and your partner pipeline.",
 };
 
 export default function RootLayout({

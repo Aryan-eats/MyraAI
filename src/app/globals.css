@@ -1,19 +1,193 @@
+@import url("https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Hanken+Grotesk:wght@400;450;500;600;700&display=swap");
 @import "tailwindcss";
 
 :root {
-  --bg-start: #ffffff;
-  --bg-end: #f4f4f5;
-  --surface: #ffffff;
-  --surface-soft: #fafafa;
-  --border: #e4e4e7;
-  --text: #18181b;
-  --text-muted: #52525b;
-  --brand: #111111;
+  /* Warm paper fintech palette — light */
+  --bg: #f6f4ee;
+  --bg-soft: #efece3;
+  --surface: #fffefb;
+  --surface-soft: #f1eee6;
+  --surface-elev: #ffffff;
+  --border: #e6e1d5;
+  --border-strong: #d7d1c2;
+  --text: #1b1a16;
+  --text-muted: #6f6a5f;
+  --text-subtle: #9a9488;
+  --accent: #0f7a52;
+  --accent-hover: #0c6444;
+  --accent-soft: #e3efe8;
+  --accent-ring: rgba(15, 122, 82, 0.28);
+  --accent-contrast: #ffffff;
+  --danger: #c0492f;
+
+  /* legacy aliases kept for existing components */
+  --bg-start: var(--bg);
+  --bg-end: var(--bg-soft);
+  --brand: var(--text);
   --brand-contrast: #ffffff;
+
+  --font-display: "Fraunces", Georgia, "Times New Roman", serif;
+  --font-body: "Hanken Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, monospace;
+
+  --shadow-sm: 0 1px 2px rgba(28, 25, 20, 0.05);
+  --shadow-md: 0 4px 18px -6px rgba(28, 25, 20, 0.14);
+  --shadow-lg: 0 24px 60px -22px rgba(28, 25, 20, 0.32);
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  --bg: #15140f;
+  --bg-soft: #100f0b;
+  --surface: #1d1c15;
+  --surface-soft: #24231b;
+  --surface-elev: #262419;
+  --border: #34312a;
+  --border-strong: #423f35;
+  --text: #f3f0e8;
+  --text-muted: #a8a294;
+  --text-subtle: #7c7669;
+  --accent: #43c089;
+  --accent-hover: #5cd09c;
+  --accent-soft: #17281f;
+  --accent-ring: rgba(67, 192, 137, 0.32);
+  --accent-contrast: #0b1410;
+  --danger: #e2795f;
+  --brand: var(--text);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 6px 22px -8px rgba(0, 0, 0, 0.6);
+  --shadow-lg: 0 28px 70px -24px rgba(0, 0, 0, 0.7);
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #15140f;
+    --bg-soft: #100f0b;
+    --surface: #1d1c15;
+    --surface-soft: #24231b;
+    --surface-elev: #262419;
+    --border: #34312a;
+    --border-strong: #423f35;
+    --text: #f3f0e8;
+    --text-muted: #a8a294;
+    --text-subtle: #7c7669;
+    --accent: #43c089;
+    --accent-hover: #5cd09c;
+    --accent-soft: #17281f;
+    --accent-ring: rgba(67, 192, 137, 0.32);
+    --accent-contrast: #0b1410;
+    --danger: #e2795f;
+    --brand: var(--text);
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-md: 0 6px 22px -8px rgba(0, 0, 0, 0.6);
+    --shadow-lg: 0 28px 70px -24px rgba(0, 0, 0, 0.7);
+    color-scheme: dark;
+  }
 }
 
 html,
 body {
-  background: linear-gradient(135deg, var(--bg-start), var(--bg-end));
+  background: var(--bg);
   color: var(--text);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  font-feature-settings: "cv11", "ss01";
+}
+
+/* Tabular figures for money/numbers */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Custom scrollbars */
+.scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+.scroll-thin::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+.scroll-thin::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+.scroll-thin::-webkit-scrollbar-thumb:hover {
+  background: var(--text-subtle);
+  background-clip: content-box;
+}
+
+/* Motion */
+@keyframes riseIn {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes msgIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+@keyframes blink {
+  0%,
+  80%,
+  100% {
+    opacity: 0.2;
+    transform: translateY(0);
+  }
+  40% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.rise {
+  animation: riseIn 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.msg-in {
+  animation: msgIn 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.fade-in {
+  animation: fadeIn 0.4s ease both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rise,
+  .msg-in,
+  .fade-in {
+    animation: none;
+  }
+}
+
+.typing-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--text-subtle);
+  display: inline-block;
+  animation: blink 1.3s infinite both;
 }

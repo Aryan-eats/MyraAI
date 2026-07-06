@@ -22,7 +22,7 @@ function jsonResponse(payload: Record<string, unknown>, status = 200) {
 function clientConversationToGemini(conversation: WebChatBody["conversation"]): GeminiMessage[] {
   const history = (conversation ?? [])
     .filter((message) => message.text.trim())
-    .map((message) => ({
+    .map((message): GeminiMessage => ({
       role: message.role === "assistant" ? "model" : "user",
       content: message.text.trim(),
     }))
