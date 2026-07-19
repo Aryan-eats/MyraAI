@@ -1,154 +1,124 @@
-# Myra AI - Loan Chatbot and CRM Assistant
+# Myra AI Chat Frontend
 
-Myra AI is an AI assistant platform for lending teams. It has two focused assistants:
+Myra AI is a public loan and finance chat interface built with Next.js. This
+repository contains only the browser UI; authentication, assistant execution,
+conversation persistence, and authorization belong to the separate LoanApp API.
 
-- `myra-web`: customer-facing loan chatbot for product questions, eligibility guidance, and lead capture
-- `myra-crm`: authenticated CRM assistant for partner operations, pipeline work, documents, WhatsApp outreach, and daily briefings
+## What This Repository Owns
 
-## What it does
+- Public guest and Google-authenticated chat UI
+- Server-backed conversation history controls
+- Anonymous browser session and active-conversation identifiers
+- Light and dark themes
+- Assistant message formatting
+- A typed browser client for LoanApp
 
-- Answers loan product, rate, document, process, and eligibility questions
-- Gives indicative FOIR-based loan eligibility guidance
-- Captures qualified borrower leads from chat
-- Helps CRM users review applications, documents, pipeline status, commissions, and partner notes
-- Sends WhatsApp outreach with consent and rate-limit checks
-- Generates morning briefings for partner follow-ups
-- Uses MongoDB for lending knowledge and CRM brief storage
-- Uses Redis for caching and conversation memory
+It does not contain a local chatbot backend, database, LLM integration, CRM,
+admin dashboard, custom bot builder, embedded widget, or knowledge-ingestion
+pipeline.
 
-## Assistants
+## Architecture
 
-### Customer Loan Chatbot
-
-Path: `src/agents/web`
-
-Endpoint:
-
-```http
-POST /api/chat/web
+```text
+Browser
+  -> Next.js chat page
+  -> src/lib/loanAppApi.ts
+  -> LoanApp API
+  -> assistant runtime and PostgreSQL persistence
 ```
 
-The chatbot is public-facing and unauthenticated. It can explain loan options, compare products, estimate eligibility, and collect lead details when the user shows intent.
+LoanApp is the source of truth. If LoanApp is unavailable, this frontend reports
+the request failure; it does not fall back to another assistant backend.
 
-It does not access private applicant data, CRM records, Aadhaar, PAN, bank account details, or OTPs.
+## Setup
 
-### CRM Assistant
-
-Path: `src/agents/crm`
-
-Endpoint:
-
-```http
-POST /api/chat/crm
-```
-
-The CRM assistant requires a valid partner JWT. It can use tools for:
-
-- WhatsApp outreach
-- Document analysis and checklist gaps
-- Soft-check eligibility
-- Pipeline and commission queries
-- Partner notes
-- Morning briefing generation
-
-## API routes
-
-- `POST /api/chat/web`
-- `POST /api/chat/crm`
-- `POST /api/webhooks/briefing-cron`
-- `GET /api/partner/briefing/today`
-
-## Environment variables
-
-Create `.env` from `.env.example` and keep real secrets out of version control.
-
-```env
-MONGODB_URI=mongodb+srv://username:password@cluster.example.mongodb.net/agent
-GPS_INDIA_API_URL=http://localhost:4000
-GPS_INDIA_WEBHOOK_URL=http://localhost:4000/internal/ops/chat-escalation
-GEMINI_API_KEY=your_gemini_api_key
-OPENAI_API_KEY=your_openai_api_key
-CLAUDE_API_KEY=your_claude_api_key
-OPENROUTER_API_KEY=your_openrouter_api_key
-OPENROUTER_DEFAULT_MODEL=meta-llama/llama-3.3-70b-instruct:free
-LLM_PROVIDER_ORDER=gemini,openrouter
-REDIS_URL=redis://127.0.0.1:6379
-CHAT_ALLOWED_ORIGINS=http://localhost:3000
-CHAT_RATE_LIMIT_MAX=30
-CHAT_RATE_LIMIT_WINDOW_MS=60000
-```
-
-Notes:
-
-- `.env` is ignored and should stay local.
-- `.env.example` contains placeholders only.
-- Gemini is first by default, with OpenRouter as fallback.
-- Rotate any real provider or database keys that were ever exposed.
-
-## Install and run
+Install dependencies:
 
 ```bash
 npm install
+```
+
+Configure the LoanApp API URL in `.env.local`:
+
+```env
+NEXT_PUBLIC_LOANAPP_API_URL=http://localhost:5000/api
+```
+
+The `/api` prefix is required. When the variable is absent, the client uses the
+same local URL by default.
+
+Start development:
+
+```bash
 npm run dev
 ```
 
-## Tests
+Open `http://localhost:3000`.
 
-```bash
-npm test
-```
+## Commands
 
-Current tests cover:
+| Command | Purpose |
+| --- | --- |
+| `npm run dev` | Start the Next.js development server |
+| `npm run build` | Create a production build |
+| `npm start` | Serve the production build |
+| `npm test` | Run the focused Vitest suite |
+| `npm run lint` | Run ESLint |
+| `npx tsc --noEmit` | Type-check without emitting files |
 
-- CRM agent loop behavior
-- Soft-check logic
-- WhatsApp consent and rate limiting
-- Chat auth
-- Document analysis redaction and checklist handling
-- Web eligibility and product comparison tools
+On Windows PowerShell, use `npm.cmd` or `npx.cmd` if script execution policy
+blocks `npm` or `npx`.
 
-## Seed lending knowledge
+## LoanApp API Contract
 
-Review the seed file first:
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `POST` | `/auth/chat/refresh` | Restore chat authentication |
+| `GET` | `/auth/chat/google` | Start Google sign-in |
+| `POST` | `/auth/chat/logout` | End the chat session |
+| `POST` | `/assistant/message` | Create or continue a conversation |
+| `GET` | `/assistant/conversations` | List owned conversations |
+| `GET` | `/assistant/conversations/:id/messages` | Load conversation messages |
+| `DELETE` | `/assistant/conversations/:id` | Delete a conversation |
 
-- `KNOWLEDGE_BASE_SEED.md`
+Requests use `credentials: "include"`. After authentication refresh, the chat
+access token is held in memory and sent as a bearer token; it is never written
+to browser storage.
 
-Then seed products into MongoDB:
+## Browser State
 
-```bash
-npx tsx src/jobs/seedKnowledge.ts
-```
+| Key | Purpose |
+| --- | --- |
+| `assistantSessionId` | Opaque anonymous session UUID |
+| `assistantConversationId` | Last active conversation |
+| `myra.theme` | Light or dark theme preference |
 
-## Morning briefing
+Conversation messages are stored by LoanApp, not in this frontend's
+`localStorage`.
 
-Call this route from a scheduler:
+## Source Map
 
-```http
-POST /api/webhooks/briefing-cron
-```
+| Path | Responsibility |
+| --- | --- |
+| `src/app/page.tsx` | Single public chat page |
+| `src/components/ChatWorkspace.tsx` | Chat, history, auth, and theme UI |
+| `src/components/FormattedChatMessage.tsx` | Assistant response rendering |
+| `src/lib/loanAppApi.ts` | LoanApp browser API client |
+| `src/lib/chatFormatting.ts` | Chat text parser |
+| `src/tests/chat-client.test.ts` | API, auth, history, and storage checks |
+| `src/tests/chat-formatting.test.ts` | Message-formatting checks |
 
-The job runs only when `ENABLE_MORNING_BRIEF=true` and the request includes the correct `x-briefing-secret` header.
+## Cross-Origin Requirements
 
-## Security model
+When the frontend and LoanApp use different origins, LoanApp must allow the
+frontend origin, credentialed requests, and the correct OAuth return URL. Do not
+put secrets in `NEXT_PUBLIC_LOANAPP_API_URL`; every `NEXT_PUBLIC_*` value is
+included in the browser bundle.
 
-- Public chatbot has no CRM or private applicant-data access
-- CRM endpoint requires partner authentication
-- Partner scope is enforced in backend tools, not only in prompts
-- WhatsApp sending checks consent and rate limits
-- Document analysis stores redacted structured fields only
-- Cron webhook validates a shared secret before running
+## Learn More
 
-## Tech stack
-
-- Next.js App Router
-- TypeScript
-- MongoDB and Mongoose
-- Redis and ioredis
-- Gemini
-- OpenRouter
-- OpenAI fallback
-- Anthropic Claude fallback
-- Vitest
+Start with [docs/learn/README.md](docs/learn/README.md) for architecture, chat
+flows, integrations, development guidance, and the onboarding checklist.
 
 ## License
 

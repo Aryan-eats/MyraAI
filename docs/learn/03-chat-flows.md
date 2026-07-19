@@ -1,185 +1,60 @@
 # Chat Flows
 
-The project has four main assistant APIs plus one older embedded bot route.
-
-## UI Routing
-
-`src/app/chat/page.tsx` accepts:
+## Send A Message
 
 ```text
-/chat?mode=web
-/chat?mode=crm
-/chat?mode=partner
-/chat?mode=admin
+User submits text
+  -> optimistically render the user message
+  -> POST /assistant/message
+  -> LoanApp returns conversationId, message, and actions
+  -> render the assistant message
+  -> refresh conversation history
 ```
 
-`src/components/ChatClient.tsx` maps each mode to an endpoint:
-
-| Mode | Endpoint | Auth |
-| --- | --- | --- |
-| `web` | `/api/chat/web` | None |
-| `crm` | `/api/chat/crm` | GPS JWT |
-| `partner` | `/api/chat/partner` | GPS JWT |
-| `admin` | `/api/chat/admin` | GPS JWT |
-
-## Public Loan Chatbot
-
-Files:
-
-- `src/app/api/chat/web/route.ts`
-- `src/agents/web/agent.ts`
-- `src/agents/web/persona.ts`
-- `src/agents/web/tools/*`
-
-Request shape:
+Request body:
 
 ```json
 {
-  "message": "I need a home loan",
-  "sessionId": "optional-session-id",
-  "conversation": []
+  "message": "What documents do I need for a home loan?",
+  "conversationId": "optional-existing-id",
+  "sessionId": "browser-session-uuid"
 }
 ```
 
-Flow:
+The UI currently renders `message`. The returned `actions` field is typed but
+not displayed.
 
-```text
-POST /api/chat/web
-  -> load Redis history
-  -> use browser conversation only if Redis has no history
-  -> runWebAgent()
-  -> execute first requested tool, if any
-  -> ask model for final answer
-  -> save history
-  -> return answer, sessionId, toolsUsed, leadCaptured
-```
+## Conversation History
 
-Tools:
-
-| Tool | Purpose |
+| Action | LoanApp request |
 | --- | --- |
-| `search_knowledge` | Find product/rate/process answers |
-| `compare_products` | Compare lenders and offers |
-| `get_documents` | Return document checklist |
-| `calculate_emi` | Calculate EMI |
-| `check_eligibility` | Estimate FOIR-based eligibility |
-| `capture_lead` | Create or forward a borrower lead |
+| List | `GET /assistant/conversations?sessionId=...` |
+| Load | `GET /assistant/conversations/:id/messages?sessionId=...` |
+| Delete | `DELETE /assistant/conversations/:id?sessionId=...` |
 
-Important behavior:
+Starting a new conversation clears only the active conversation ID and visible
+messages. It does not delete stored history.
 
-- Current-message language wins: Hindi, Hinglish, or English.
-- It should not ask for Aadhaar, PAN, bank account numbers, or OTPs.
-- `compare_products` tries GPS backend offers first, then PostgreSQL, then
-  MongoDB lending fallback data.
-- `capture_lead` tries GPS backend lead creation first when enough fields exist.
+## Anonymous Identity
 
-## CRM Assistant
+`getAssistantSessionId()` reuses `localStorage.assistantSessionId` or creates a
+UUID with `crypto.randomUUID()`. The client sends it on assistant and history
+requests so the backend can resolve guest ownership.
 
-Files:
-
-- `src/app/api/chat/crm/route.ts`
-- `src/agents/crm/agent.ts`
-- `src/agents/crm/persona.ts`
-- `src/agents/crm/tools/*`
-
-Flow:
+## Google Sign-In
 
 ```text
-POST /api/chat/crm
-  -> require partner auth
-  -> load Redis history
-  -> runCrmAgent()
-  -> model can call tools for up to 8 iterations
-  -> save history
-  -> return answer, toolsUsed, iterations
+Click "Sign in with Google"
+  -> browser navigates to /auth/chat/google on LoanApp
+  -> LoanApp completes OAuth and sets its refresh credential
+  -> frontend reload attempts POST /auth/chat/refresh
+  -> returned access token stays in memory
 ```
 
-CRM tools:
+Sign-out calls `POST /auth/chat/logout`, clears the in-memory token even if the
+request fails, resets the visible conversation, and reloads history as a guest.
 
-| Tool | Side effect |
-| --- | --- |
-| `query_pipeline` | No, reads scoped pipeline data |
-| `get_commissions` | No, reads scoped commission data |
-| `send_whatsapp` | Yes, sends or stubs WhatsApp and logs status |
-| `analyse_document` | Yes, analyzes and logs redacted document output |
-| `run_soft_check` | Yes, evaluates lead and appends note |
-| `generate_briefing` | Yes, stores briefing |
-| `add_partner_note` | Yes, writes partner note |
+## Errors
 
-CRM is the main action-capable assistant. Keep validation, scope checks, and
-side-effect rules in TypeScript, not only in the persona.
-
-## Partner Assistant
-
-Files:
-
-- `src/app/api/chat/partner/route.ts`
-- `src/agents/partner/agent.ts`
-- `src/agents/partner/persona.ts`
-- `src/agents/partner/tools/*`
-
-This is read-only. It answers partner questions about:
-
-- Pipeline overview
-- Lead status
-- Missing documents
-- Commission overview
-- Stalled leads
-
-It should refuse actions like sending WhatsApp or changing lead status.
-
-## Admin Assistant
-
-Files:
-
-- `src/app/api/chat/admin/route.ts`
-- `src/agents/admin/agent.ts`
-- `src/agents/admin/persona.ts`
-- `src/lib/adminDb.ts`
-
-This is read-only platform analytics. It can answer:
-
-- Platform overview
-- Partner performance
-- Bank statistics
-- Leads by status
-
-Admin visibility is wider than partner visibility, so auth must stay in the
-route and data helpers.
-
-## Embedded Bot Route
-
-Files:
-
-- `public/widget.js`
-- `src/app/embed/page.tsx`
-- `src/components/Chat/EmbedChat.tsx`
-- `src/app/api/chat/route.ts`
-- `src/lib/retrieval.ts`
-
-Flow:
-
-```text
-External site script
-  -> iframe /embed?botId=...
-  -> POST /api/chat { botId, message, sessionId }
-  -> load Bot and ChatSession from MongoDB
-  -> retrieve KnowledgeChunk rows
-  -> generate answer from retrieved bot knowledge
-  -> append ChatSession messages
-```
-
-This path is separate from `/api/chat/web`. It is for custom embedded bots, not
-the first-party loan chatbot.
-
-## Debugging A Bad Answer
-
-Use this order:
-
-1. Confirm which endpoint was called.
-2. Confirm auth resolved the expected user and partner scope.
-3. Confirm Redis history is not carrying stale context.
-4. Confirm the model requested the expected tool.
-5. Confirm the tool returned the expected data.
-6. Confirm the persona tells the model how to use that data.
-7. Add the smallest test that would catch the bug next time.
+LoanApp errors are appended as assistant messages. Initial auth or history
+errors degrade to guest mode with an empty history list.

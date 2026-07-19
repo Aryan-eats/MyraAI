@@ -1,78 +1,52 @@
 # Learn Myra AI
 
-This folder explains the project for someone joining from outside the team.
-Start here before reading source code.
+This folder documents the current Myra AI frontend. Start here before reading
+the source.
 
 ## Product In One Paragraph
 
-Myra AI is a lending assistant platform. It has a public loan chatbot for
-borrowers and authenticated assistants for CRM users. The public chatbot answers
-loan questions, compares products, estimates eligibility, and captures leads.
-The CRM assistant helps partners and operations users check pipeline status,
-review documents, run soft checks, send WhatsApp follow-ups, and generate daily
-briefings.
+Myra AI is a public loan and finance chat interface. The Next.js app renders the
+chat experience and delegates authentication, conversation storage, and
+assistant responses to the separate LoanApp API. Guests receive a browser-local
+anonymous session ID; users can optionally sign in with Google.
 
-## Who Uses It
+## Current Surface
 
-| User | What they do | Main route |
+| User | What they can do | Route |
 | --- | --- | --- |
-| Borrower | Ask about loans, documents, rates, EMI, eligibility | `/chat?mode=web` |
-| Partner CRM user | Follow up leads, check pipeline, run CRM actions | `/chat?mode=crm` |
-| Partner viewer | Read partner pipeline and commissions | `/chat?mode=partner` |
-| Admin or ops user | Read platform-wide metrics | `/chat?mode=admin` |
-| Bot owner | Manage older embeddable bots and knowledge | `/dashboard` |
+| Guest | Chat and manage browser-owned conversation history | `/` |
+| Signed-in user | Chat with a Google-backed LoanApp identity | `/` |
+
+There are no local CRM, partner, admin, dashboard, embedded-widget, knowledge
+management, or chat API routes in the active application.
 
 ## Read In This Order
 
-1. [01-project-map.md](01-project-map.md): product map, repo layout, glossary.
-2. [02-architecture.md](02-architecture.md): how requests move through the app.
-3. [03-chat-flows.md](03-chat-flows.md): every assistant from UI to response.
-4. [04-data-and-integrations.md](04-data-and-integrations.md): databases, APIs, LLMs, feature flags.
-5. [05-development-playbook.md](05-development-playbook.md): setup, tests, common changes.
-6. [06-reading-checklist.md](06-reading-checklist.md): onboarding exercises.
+1. [01-project-map.md](01-project-map.md): active files and terminology.
+2. [02-architecture.md](02-architecture.md): browser-to-LoanApp request flow.
+3. [03-chat-flows.md](03-chat-flows.md): chat, history, and authentication flows.
+4. [04-data-and-integrations.md](04-data-and-integrations.md): runtime state and API contract.
+5. [05-development-playbook.md](05-development-playbook.md): setup and common changes.
+6. [06-reading-checklist.md](06-reading-checklist.md): a short onboarding exercise.
 
 ## Fast Mental Model
 
 ```text
 Browser
-  -> Next.js page or API route in src/app
-  -> agent loop in src/agents/<mode>
-  -> typed tools in src/agents/<mode>/tools
-  -> shared adapters in src/lib
-  -> MongoDB, Redis, PostgreSQL, GPS backend, WhatsApp, or LLM provider
+  -> src/app/page.tsx
+  -> src/components/ChatWorkspace.tsx
+  -> src/lib/loanAppApi.ts
+  -> LoanApp API
+  -> PostgreSQL / assistant runtime
 ```
 
-Prompts decide what the assistant should try. TypeScript code decides what is
-allowed, which data can be accessed, and which external service is called.
+The frontend does not call an LLM or database directly.
 
-## Main Code Areas
+## Only Required Configuration
 
-| Area | Files |
-| --- | --- |
-| Chat page | `src/app/chat/page.tsx`, `src/components/ChatClient.tsx` |
-| Public loan chatbot | `src/app/api/chat/web/route.ts`, `src/agents/web/*` |
-| CRM assistant | `src/app/api/chat/crm/route.ts`, `src/agents/crm/*` |
-| Partner assistant | `src/app/api/chat/partner/route.ts`, `src/agents/partner/*` |
-| Admin assistant | `src/app/api/chat/admin/route.ts`, `src/agents/admin/*` |
-| LLM fallback | `src/lib/llm/router.ts`, `src/lib/gemini.ts` |
-| Auth | `src/lib/chatAuth.ts`, `src/lib/getSession.ts`, `src/proxy.ts` |
-| Data access | `src/lib/loanDb.ts`, `src/lib/crmDb.ts`, `src/lib/adminDb.ts` |
-| CRM actions | `src/lib/gpsBridge.ts`, `src/lib/whatsapp.ts`, `src/lib/softCheckEngine.ts`, `src/lib/documentAnalyser.ts` |
+```env
+NEXT_PUBLIC_LOANAPP_API_URL=http://localhost:5000/api
+```
 
-## Terms Used In This Project
-
-| Term | Meaning |
-| --- | --- |
-| FOIR | Fixed obligation to income ratio, used for indicative affordability checks |
-| Lead | A borrower enquiry or loan opportunity |
-| Partner | A DSA/channel partner using the CRM |
-| Soft check | Rule-based eligibility review before formal underwriting |
-| Briefing | Daily CRM summary for follow-ups and stalled leads |
-| Tool | A TypeScript function the LLM can ask the agent to run |
-| GPS backend | External lending/CRM backend configured by `GPS_INDIA_API_URL` |
-
-## Current Caveat
-
-The repo still contains an older embeddable bot product path (`public/widget.js`,
-`/embed`, `/api/chat` with `botId`). It is documented where relevant, but the
-primary product explained here is the loan chatbot and CRM assistant.
+The client uses that URL for every request and falls back to the same local URL
+when the variable is absent.

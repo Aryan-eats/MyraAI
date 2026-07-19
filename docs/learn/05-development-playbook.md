@@ -7,145 +7,64 @@ npm install
 npm run dev
 ```
 
-Default local URL:
+The frontend runs at `http://localhost:3000` and expects LoanApp at
+`http://localhost:5000/api` unless `NEXT_PUBLIC_LOANAPP_API_URL` overrides it.
 
-```text
-http://localhost:3000
-```
+On Windows PowerShell, use `npm.cmd` if script execution policy blocks `npm`.
 
-Useful checks:
+## Smallest Useful Checks
+
+For API-client or chat state changes:
 
 ```bash
-npm test
+npx vitest run src/tests/chat-client.test.ts
+```
+
+For page, styles, imports, or build configuration:
+
+```bash
 npm run build
-npm run lint
-```
-
-On Windows PowerShell, use `npm.cmd` if script execution policy blocks `npm`:
-
-```bash
-npm.cmd test
-```
-
-## Local Services
-
-`docker-compose.yml` provides local Redis and PostgreSQL containers. Redis
-matches the app. PostgreSQL needs care because current code reads
-`DATABASE_URL` and expects the live GPS schema, not the older checked-in SQL
-file.
-
-For realistic lending/CRM testing, point `DATABASE_URL` and `GPS_INDIA_API_URL`
-at a real dev backend.
-
-## Tests
-
-Vitest config:
-
-- `vitest.config.mjs`
-- Tests live in `src/tests/**/*.test.ts`.
-- External LLM, DB, and API calls are usually mocked.
-
-Run all tests:
-
-```bash
-npm test
-```
-
-Run a focused file:
-
-```bash
-npx vitest run src/tests/web-agent.test.ts
 ```
 
 ## Common Changes
 
-### Change public loan chatbot behavior
+### Change the LoanApp request contract
 
-Start with:
+Edit `src/lib/loanAppApi.ts`, then update the focused client test. Keep base URL,
+credentials, auth header, envelope handling, and URL encoding centralized in
+that file.
 
-- `src/agents/web/persona.ts`
-- `src/agents/web/agent.ts`
-- `src/agents/web/tools/*`
-- `src/app/api/chat/web/route.ts`
+### Change chat behavior or layout
 
-Add or update one focused test, usually in:
+Edit `src/components/ChatWorkspace.tsx`. It owns the visible messages, history,
+auth controls, theme, optimistic send state, and active conversation.
 
-- `src/tests/web-agent.test.ts`
-- `src/tests/web-chat-route.test.ts`
-- `src/tests/compare-products.test.ts`
-- `src/tests/capture-lead.test.ts`
+### Change assistant response formatting
 
-### Add a web-agent tool
+Edit `src/components/FormattedChatMessage.tsx`.
 
-1. Add the tool function in `src/agents/web/tools`.
-2. Add its declaration in `getWebToolDeclarations()`.
-3. Add dispatch in the web agent.
-4. Update the persona only if the model needs a new usage rule.
-5. Add one focused test.
+### Change backend assistant behavior
 
-### Change CRM assistant behavior
+Do it in LoanApp. This frontend does not contain the active prompt, tools,
+retrieval, persistence, or authorization logic.
 
-Start with:
+## Manual Smoke Check
 
-- `src/agents/crm/agent.ts`
-- `src/agents/crm/persona.ts`
-- `src/agents/crm/tools/*`
-- `src/lib/gpsBridge.ts`
-- `src/tests/crm-agent.test.ts`
+With both apps running:
 
-For write actions, enforce scope, consent, validation, and logging in code.
+1. Send a guest message and reload the page.
+2. Open and delete a conversation from history.
+3. Start a new conversation.
+4. Complete Google sign-in and sign out.
+5. Confirm no access token appears in `localStorage`.
+6. Check the mobile history drawer and light/dark theme.
 
-### Change partner/admin read behavior
+## Common Failures
 
-Partner files:
-
-- `src/agents/partner/*`
-- `src/lib/crmDb.ts`
-- `src/tests/partner-chatbot.test.ts`
-
-Admin files:
-
-- `src/agents/admin/*`
-- `src/lib/adminDb.ts`
-- `src/tests/admin-chatbot.test.ts`
-
-Keep partner queries scoped. Keep admin queries behind admin auth.
-
-### Change LLM provider behavior
-
-Start with:
-
-- `src/lib/llm/router.ts`
-- `src/tests/llm-router.test.ts`
-
-Do not add provider-specific handling inside each agent unless there is no
-cleaner router-level fix.
-
-## Gotchas
-
-| Gotcha | Why it matters |
+| Symptom | Check |
 | --- | --- |
-| Web mode handles one tool call | Multi-step public answers need an agent-loop change |
-| CRM mode can loop up to 8 iterations | A missing final model answer can become a route error |
-| Redis failures are often swallowed | Local chat history may differ from production |
-| `GPS_JWT_PUBLIC_KEY` is optional | Without it, signature verification is skipped |
-| `GPS_INDIA_API_URL` changes web behavior | Offer matching and lead capture use backend first |
-| `DATABASE_URL` controls PostgreSQL paths | Without it, tools use fallbacks or return limited data |
-| Gemini is still used directly | Embeddings and document analysis need `GEMINI_API_KEY` |
-| `db/crm_assistant_schema.sql` is stale | Do not use it as the live schema reference |
-
-## Before Finishing A Change
-
-Run the smallest check that proves the change:
-
-```bash
-npm test
-```
-
-For route, dependency, or build-sensitive work:
-
-```bash
-npm run build
-```
-
-For UI changes, start the dev server and exercise the changed page manually.
+| Every request fails | Base URL includes the correct `/api` prefix |
+| Browser reports CORS | LoanApp allows the frontend origin and credentials |
+| Google login loops | LoanApp OAuth callback and frontend return URL |
+| History disappears | `assistantSessionId`, auth refresh, and backend owner resolution |
+| `401` after page load | Refresh cookie policy and `/auth/chat/refresh` response |
